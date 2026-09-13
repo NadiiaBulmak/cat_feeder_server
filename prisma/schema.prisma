@@ -1,0 +1,56 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"] 
+}
+
+datasource db {
+  provider   = "postgresql" 
+  url        = env("DATABASE_URL")
+  extensions = [vector]    
+}
+
+
+model Feeder {
+  id          Int         @id @default(autoincrement())
+  name        String      
+  isOpened    Boolean     @default(false)
+  lastPing    DateTime    @default(now()) 
+  
+  logs        AccessLog[] 
+}
+
+model Cat {
+  id          Int         @id @default(autoincrement())
+  name        String
+  
+  tags        RfidTag[]  
+  faces       CatFace[]  
+  logs        AccessLog[]
+}
+
+model RfidTag {
+  id          Int      @id @default(autoincrement())
+  tagValue    String   @unique 
+  catId       Int
+  cat         Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+}
+
+model CatFace {
+  id          Int      @id @default(autoincrement())
+  faceData    String   
+  catId       Int
+  cat         Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+}
+
+model AccessLog {
+  id          Int      @id @default(autoincrement())
+  
+  feederId    Int
+  feeder      Feeder   @relation(fields: [feederId], references: [id])
+  
+  catId       Int?     
+  cat         Cat?     @relation(fields: [catId], references: [id])
+  
+  openedAt    DateTime @default(now())
+  trigger     String   // Як відкрили: "RFID", "FACE", "APP"
+}
