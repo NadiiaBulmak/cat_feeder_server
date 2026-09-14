@@ -6,3 +6,5 @@ node_modules
 .claude
 .cursor
 .devin
+
+/dist

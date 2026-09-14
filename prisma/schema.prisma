@@ -9,48 +9,91 @@ datasource db {
   extensions = [vector]    
 }
 
+enum FeederState {
+  OPEN
+  CLOSED
+}
+
+enum StateChangeSource {
+  HUMAN
+  RFID
+  FACEID
+}
 
 model Feeder {
-  id          Int         @id @default(autoincrement())
-  name        String      
-  isOpened    Boolean     @default(false)
-  lastPing    DateTime    @default(now()) 
+  id           String      @id @default(uuid())
+  name         String
+  deviceId     String      @unique // Ідентифікатор для ESP8266 (напр. 'esp8266-feeder-01')
   
-  logs        AccessLog[] 
+  desiredState FeederState @default(CLOSED)
+  actualState  FeederState @default(CLOSED)
+  
+  lastPing     DateTime    @default(now()) 
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  logs         AccessLog[]
+  history      FeederStateHistory[]
+}
+
+model FeederStateHistory {
+  id        String            @id @default(uuid())
+  feederId  String
+  state     FeederState
+  source    StateChangeSource
+  createdAt DateTime          @default(now())
+
+  feeder    Feeder            @relation(fields: [feederId], references: [id], onDelete: Cascade)
 }
 
 model Cat {
-  id          Int         @id @default(autoincrement())
-  name        String
+  id         String      @id @default(uuid())
+  name       String
   
-  tags        RfidTag[]  
-  faces       CatFace[]  
-  logs        AccessLog[]
+  tags       RfidTag[]  
+  faces      CatFace[]  
+  logs       AccessLog[]
 }
 
 model RfidTag {
-  id          Int      @id @default(autoincrement())
-  tagValue    String   @unique 
-  catId       Int
-  cat         Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  tagValue   String   @unique 
+  catId      String
+  cat        Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
 }
 
 model CatFace {
-  id          Int      @id @default(autoincrement())
-  faceData    String   
-  catId       Int
-  cat         Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  faceData   String   
+  catId      String
+  cat        Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
 }
 
 model AccessLog {
-  id          Int      @id @default(autoincrement())
+  id         String   @id @default(uuid())
   
-  feederId    Int
-  feeder      Feeder   @relation(fields: [feederId], references: [id])
+  feederId   String
+  feeder     Feeder   @relation(fields: [feederId], references: [id], onDelete: Cascade)
   
-  catId       Int?     
-  cat         Cat?     @relation(fields: [catId], references: [id])
+  catId      String?     
+  cat        Cat?     @relation(fields: [catId], references: [id], onDelete: SetNull)
   
-  openedAt    DateTime @default(now())
-  trigger     String   // Як відкрили: "RFID", "FACE", "APP"
+  openedAt   DateTime @default(now())
+  trigger    String   // Як відкрили: "RFID", "FACE", "APP"
+}
+
+model Camera {
+  id        String   @id @default(uuid())
+  name      String
+  ipAddress String   @unique // IP має бути унікальним для пошуку
+  photos    Photo[]  
+  createdAt DateTime @default(now())
+}
+
+model Photo {
+  id        String   @id @default(uuid())
+  filename  String
+  cameraId  String
+  camera    Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 }

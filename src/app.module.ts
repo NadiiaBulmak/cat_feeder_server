@@ -4,6 +4,10 @@ import { createObserveModule } from '@nestjs/observe';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { CameraModule } from './camera/camera.module.js';
+import { CameraController } from './camera/camera.controller.js';
+import { CameraService } from './camera/camera.service.js';
+import { FeedersModule } from './feeders/feeders.module.js';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -13,8 +17,10 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
       isGlobal: true,
     }),
     PrismaModule,
+    CameraModule,
+    FeedersModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, CameraController],
   providers: [AppService],
 })
 export class AppModule {}
