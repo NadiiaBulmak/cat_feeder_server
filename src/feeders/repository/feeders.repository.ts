@@ -18,7 +18,7 @@ export class FeederRepository {
 
         return this.prisma.feeder.update({
             where: { id },
-            data: {actualState},
+            data: {actualState, desiredState: actualState},
         });
     }
 

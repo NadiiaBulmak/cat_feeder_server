@@ -1,13 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { CreateFeederDto } from './dto/create-feeder.dto.js';
 import { UpdateFeederDto } from './dto/update-feeder.dto.js';
 import { FeederRepository } from './repository/feeders.repository.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederAction, FeederState } from '../shared/enums.js';
+import { FeedersGateway } from './feeders.gateway.js';
 
 @Injectable()
 export class FeedersService {
-constructor(private readonly feederRepository: FeederRepository, private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly feederRepository: FeederRepository,
+    private readonly prisma: PrismaService,
+    private readonly gateway: FeedersGateway,
+  ) {}
 
   create(createFeederDto: CreateFeederDto) {
     return this.feederRepository.addFeeder({
@@ -28,20 +33,40 @@ constructor(private readonly feederRepository: FeederRepository, private readonl
 
   update(id: string, action: FeederAction) {
     let actualState: FeederState = FeederState.OPEN;
-    switch (action) {
-      case FeederAction.OPEN:
-        actualState = FeederState.OPEN;
-        break;
-      case FeederAction.CLOSE:
-        actualState = FeederState.CLOSED;
-        break;
-      default:
-        throw new Error(`Invalid action: ${action}`);
-    }
-    return this.feederRepository.updateFeeder(id, actualState);
+    const newState = action === 'open' ? FeederState.OPEN : FeederState.CLOSED;
+    return this.feederRepository.updateFeeder(id, newState);
   }
 
   remove(id: string) {
     return this.feederRepository.removeFeeder(id);
+  }
+
+  async setFeederState(id: string, action: FeederAction) {
+    const feeder = await this.prisma.feeder.findUnique({
+      where: { id },
+    });
+
+    // console.log(feeder)
+
+    if (!feeder) {
+      console.log('no feeder')
+      throw new NotFoundException('Feeder not found');
+    }
+
+    const newState = action === 'open' ? FeederState.OPEN : FeederState.CLOSED;
+    console.log(newState)
+
+    const commandSent = this.gateway.sendCommandToDevice(
+      feeder.deviceId,
+      newState,
+    );
+
+    if (!commandSent) {
+      throw new ServiceUnavailableException('Feeder device is offline');
+    }
+
+    const updatedFeeder = await this.feederRepository.updateFeeder(id, newState);
+
+    return updatedFeeder;
   }
 }
