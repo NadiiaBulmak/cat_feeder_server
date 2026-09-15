@@ -24,8 +24,8 @@ export class FeedersController {
   }
 
   @Patch(':id/:action')
-  update(@Param('id') id: string, @Param('action') action: FeederAction, @Body() updateFeederDto: UpdateFeederDto) {
-    return this.feedersService.update(id, updateFeederDto, action);
+  update(@Param('id') id: string, @Param('action') action: FeederAction) {
+    return this.feedersService.update(id, action);
   }
 
   @Delete(':id')

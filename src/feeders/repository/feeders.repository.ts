@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Feeder, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { FeederState } from '../../shared/enums.js';
 
 @Injectable()
 export class FeederRepository {
@@ -10,15 +11,14 @@ export class FeederRepository {
         return this.prisma.feeder.create({ data: feeder });
     }
 
-    updateFeeder(id: string, updateData: Partial<Feeder>): Promise<Feeder> {
-        if (Object.keys(updateData).length === 0) {
+    updateFeeder(id: string, actualState: FeederState): Promise<Feeder> {
+        if (!actualState) {
             throw new BadRequestException('Update data cannot be empty');
         }
 
-        console.log('Updating feeder with ID:', id, 'Update data:', updateData);
         return this.prisma.feeder.update({
             where: { id },
-            data: updateData,
+            data: {actualState},
         });
     }
 
