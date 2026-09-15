@@ -13,6 +13,10 @@ async function bootstrap() {
     }),
   );
 
+  app.enableCors({
+    origin: [process.env.LOCAL_FRONTEND, process.env.VERCEL_FRONTEND],
+  });
+
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
 await bootstrap();
