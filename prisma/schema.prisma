@@ -1,12 +1,12 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"] 
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider   = "postgresql" 
+  provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [vector]    
+  extensions = [vector]
 }
 
 enum FeederState {
@@ -21,17 +21,20 @@ enum StateChangeSource {
 }
 
 model Feeder {
-  id           String      @id @default(uuid())
+  id           String   @id @default(uuid())
   name         String
-  deviceId     String      @unique // Ідентифікатор для ESP8266 (напр. 'esp8266-feeder-01')
+  deviceId     String   @unique // Ідентифікатор для ESP8266 (напр. 'esp8266-feeder-01')
   
   desiredState FeederState @default(CLOSED)
   actualState  FeederState @default(CLOSED)
   
-  lastPing     DateTime    @default(now()) 
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  lastPing     DateTime @default(now()) 
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   
+  // Користувачі, які мають доступ до цієї годівнички (Many-to-Many)
+  users        User[]
+
   logs         AccessLog[]
   history      FeederStateHistory[]
 }
@@ -41,51 +44,56 @@ model FeederStateHistory {
   feederId  String
   state     FeederState
   source    StateChangeSource
+  userId    String?           // Хто саме відкрив (якщо це зробив людина через App)
   createdAt DateTime          @default(now())
 
   feeder    Feeder            @relation(fields: [feederId], references: [id], onDelete: Cascade)
+  user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
 }
 
 model Cat {
-  id         String      @id @default(uuid())
-  name       String
+  id        String      @id @default(uuid())
+  name      String
   
-  tags       RfidTag[]  
-  faces      CatFace[]  
-  logs       AccessLog[]
+  tags      RfidTag[]   
+  faces     CatFace[]   
+  logs      AccessLog[]
 }
 
 model RfidTag {
-  id         String   @id @default(uuid())
-  tagValue   String   @unique 
-  catId      String
-  cat        Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  tagValue String @unique 
+  catId    String
+  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
 }
 
 model CatFace {
-  id         String   @id @default(uuid())
-  faceData   String   
-  catId      String
-  cat        Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  faceData String   
+  catId    String
+  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
 }
 
 model AccessLog {
-  id         String   @id @default(uuid())
+  id        String   @id @default(uuid())
   
-  feederId   String
-  feeder     Feeder   @relation(fields: [feederId], references: [id], onDelete: Cascade)
+  feederId  String
+  feeder    Feeder   @relation(fields: [feederId], references: [id], onDelete: Cascade)
   
-  catId      String?     
-  cat        Cat?     @relation(fields: [catId], references: [id], onDelete: SetNull)
+  catId     String?     
+  cat       Cat?     @relation(fields: [catId], references: [id], onDelete: SetNull)
   
-  openedAt   DateTime @default(now())
-  trigger    String   // Як відкрили: "RFID", "FACE", "APP"
+  userId    String?  // Записуємо користувача, якщо ручне відкриття
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  openedAt  DateTime @default(now())
+  trigger   String   // "RFID", "FACE", "APP"
 }
 
 model Camera {
   id        String   @id @default(uuid())
   name      String
-  ipAddress String   @unique // IP має бути унікальним для пошуку
+  ipAddress String   @unique
   photos    Photo[]  
   createdAt DateTime @default(now())
 }
@@ -96,4 +104,34 @@ model Photo {
   cameraId  String
   camera    Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+}
+
+model User {
+  id           String      @id @default(cuid())
+  name         String?
+  email        String      @unique
+  passwordHash String?
+  googleId     String?     @unique
+  avatarUrl    String?
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Зв'язок "Багато до багатьох" з годівничками (Prisma автоматично створить таблицю-змичку)
+  feeders      Feeder[]
+  
+  resetToken   ResetToken?
+  history      FeederStateHistory[]
+  accessLogs   AccessLog[]
+}
+
+model ResetToken {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+  
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

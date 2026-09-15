@@ -8,6 +8,7 @@ import { CameraModule } from './camera/camera.module.js';
 import { CameraController } from './camera/camera.controller.js';
 import { CameraService } from './camera/camera.service.js';
 import { FeedersModule } from './feeders/feeders.module.js';
+import { AuthModule } from './auth/auth.module.js';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -19,6 +20,7 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
     PrismaModule,
     CameraModule,
     FeedersModule,
+    AuthModule,
   ],
   controllers: [AppController, CameraController],
   providers: [AppService],
