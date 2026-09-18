@@ -1,24 +1,20 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { createObserveModule } from '@nestjs/observe';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { CameraModule } from './camera/camera.module.js';
-import { CameraController } from './camera/camera.controller.js';
-import { CameraService } from './camera/camera.service.js';
-import { FeedersModule } from './feeders/feeders.module.js';
+import { UsersModule } from './users/users.module.js';
 import { AuthModule } from './auth/auth.module.js';
-
-export const { ObserveModule, ObserveInstrument } = createObserveModule();
+import { FeedersModule } from './feeders/feeders.module.js';
+import { AppController } from './app.controller.js';
+import { CameraController } from './camera/camera.controller.js';
+import { AppService } from './app.service.js';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     CameraModule,
+    UsersModule,
     FeedersModule,
     AuthModule,
   ],

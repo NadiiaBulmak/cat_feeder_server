@@ -14,115 +14,34 @@ enum FeederState {
   CLOSED
 }
 
-enum StateChangeSource {
-  HUMAN
-  RFID
-  FACEID
-}
-
-model Feeder {
-  id           String   @id @default(uuid())
-  name         String
-  deviceId     String   @unique // Ідентифікатор для ESP8266 (напр. 'esp8266-feeder-01')
-  
-  desiredState FeederState @default(CLOSED)
-  actualState  FeederState @default(CLOSED)
-  
-  lastPing     DateTime @default(now()) 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
-  // Користувачі, які мають доступ до цієї годівнички (Many-to-Many)
-  users        User[]
-
-  logs         AccessLog[]
-  history      FeederStateHistory[]
-}
-
-model FeederStateHistory {
-  id        String            @id @default(uuid())
-  feederId  String
-  state     FeederState
-  source    StateChangeSource
-  userId    String?           // Хто саме відкрив (якщо це зробив людина через App)
-  createdAt DateTime          @default(now())
-
-  feeder    Feeder            @relation(fields: [feederId], references: [id], onDelete: Cascade)
-  user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
-}
-
-model Cat {
-  id        String      @id @default(uuid())
-  name      String
-  
-  tags      RfidTag[]   
-  faces     CatFace[]   
-  logs      AccessLog[]
-}
-
-model RfidTag {
-  id       String @id @default(uuid())
-  tagValue String @unique 
-  catId    String
-  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
-}
-
-model CatFace {
-  id       String @id @default(uuid())
-  faceData String   
-  catId    String
-  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
-}
-
-model AccessLog {
-  id        String   @id @default(uuid())
-  
-  feederId  String
-  feeder    Feeder   @relation(fields: [feederId], references: [id], onDelete: Cascade)
-  
-  catId     String?     
-  cat       Cat?     @relation(fields: [catId], references: [id], onDelete: SetNull)
-  
-  userId    String?  // Записуємо користувача, якщо ручне відкриття
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-
-  openedAt  DateTime @default(now())
-  trigger   String   // "RFID", "FACE", "APP"
-}
-
-model Camera {
-  id        String   @id @default(uuid())
-  name      String
-  ipAddress String   @unique
-  photos    Photo[]  
-  createdAt DateTime @default(now())
-}
-
-model Photo {
-  id        String   @id @default(uuid())
-  filename  String
-  cameraId  String
-  camera    Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+enum EventType {
+  CAT_DETECTED
+  CAT_IDENTIFIED
+  FEEDER_OPENED
+  FEEDER_CLOSED
+  UNKNOWN_CAT
+  IDENTIFICATION_FAILED
+  HARDWARE_ERROR
+  APP_COMMAND
 }
 
 model User {
-  id           String      @id @default(cuid())
+  id           String   @id @default(cuid())
   name         String?
-  email        String      @unique
+  email        String   @unique
   passwordHash String?
-  googleId     String?     @unique
+  googleId     String?  @unique
   avatarUrl    String?
 
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  // Зв'язок "Багато до багатьох" з годівничками (Prisma автоматично створить таблицю-змичку)
-  feeders      Feeder[]
-  
   resetToken   ResetToken?
-  history      FeederStateHistory[]
-  accessLogs   AccessLog[]
+  
+  userFeeders  UserFeeder[]
+  userCats     UserCat[]
+
+  events       FeedingEvent[]
 }
 
 model ResetToken {
@@ -134,4 +53,127 @@ model ResetToken {
   usedAt    DateTime?
   
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Feeder {
+  id           String      @id @default(uuid())
+  name         String
+  deviceId     String      @unique
+  
+  desiredState FeederState @default(CLOSED)
+  actualState  FeederState @default(CLOSED)
+  
+  lastPing     DateTime    @default(now()) 
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  cameras      Camera[]
+
+  userFeeders  UserFeeder[]
+  feederCats   FeederCat[]
+
+  events       FeedingEvent[]
+}
+
+model Camera {
+  id        String   @id @default(uuid())
+  name      String
+  ipAddress String   @unique
+  
+  feederId  String?  
+  feeder    Feeder?  @relation(fields: [feederId], references: [id], onDelete: SetNull)
+
+  photos    Photo[]  
+  createdAt DateTime @default(now())
+}
+
+model Photo {
+  id        String   @id @default(uuid())
+  filename  String
+  
+  cameraId  String
+  camera    Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+}
+
+model Cat {
+  id        String   @id @default(uuid())
+  name      String
+  
+  tags        RfidTag[]   
+  embeddings  CatEmbedding[] // AI вектори
+  events      FeedingEvent[]
+
+  userCats    UserCat[]
+  feederCats  FeederCat[]
+}
+
+model RfidTag {
+  id       String @id @default(uuid())
+  tagValue String @unique 
+  catId    String
+  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
+}
+
+model CatEmbedding {
+  id        String   @id @default(uuid())
+  catId     String
+  
+  embedding Unsupported("vector(768)")? 
+  imageUrl  String? 
+  
+  createdAt DateTime @default(now())
+  cat       Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
+}
+
+model FeedingEvent {
+  id         String    @id @default(uuid())
+  
+  feederId   String
+  feeder     Feeder    @relation(fields: [feederId], references: [id], onDelete: Cascade)
+  
+  catId      String?     
+  cat        Cat?      @relation(fields: [catId], references: [id], onDelete: Cascade)
+  
+  userId     String?   
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  eventType  EventType
+  confidence Float?    // Впевненість AI (напр. 0.95)
+  metadata   Json?     // Додаткова інфа (фото з події, причина помилки)
+
+  createdAt  DateTime  @default(now())
+}
+
+
+model UserFeeder {
+  userId   String
+  feederId String
+  role     String @default("OWNER") // OWNER або GUEST
+
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feeder   Feeder @relation(fields: [feederId], references: [id], onDelete: Cascade)
+
+  @@id([userId, feederId]) // Композитний первинний ключ
+}
+
+model UserCat {
+  userId String
+  catId  String
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cat    Cat  @relation(fields: [catId], references: [id], onDelete: Cascade)
+
+  @@id([userId, catId])
+}
+
+model FeederCat {
+  feederId String
+  catId    String
+
+  feeder   Feeder @relation(fields: [feederId], references: [id], onDelete: Cascade)
+  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
+
+  @@id([feederId, catId])
 }
