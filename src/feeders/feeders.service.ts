@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { CreateFeederDto } from './dto/create-feeder.dto.js';
 import { UpdateFeederDto } from './dto/update-feeder.dto.js';
 import { FeederRepository } from './repository/feeders.repository.js';
@@ -49,12 +53,12 @@ export class FeedersService {
     // console.log(feeder)
 
     if (!feeder) {
-      console.log('no feeder')
+      console.log('no feeder');
       throw new NotFoundException('Feeder not found');
     }
 
     const newState = action === 'open' ? FeederState.OPEN : FeederState.CLOSED;
-    console.log(newState)
+    console.log(newState);
 
     const commandSent = this.gateway.sendCommandToDevice(
       feeder.deviceId,
@@ -65,8 +69,15 @@ export class FeedersService {
       throw new ServiceUnavailableException('Feeder device is offline');
     }
 
-    const updatedFeeder = await this.feederRepository.updateFeeder(id, newState);
+    const updatedFeeder = await this.feederRepository.updateFeeder(
+      id,
+      newState,
+    );
 
     return updatedFeeder;
+  }
+
+  getFeedersByUserId(userId: string) {
+    return this.feederRepository.findManyByUserId(userId);
   }
 }

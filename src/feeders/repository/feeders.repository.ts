@@ -34,6 +34,12 @@ export class FeederRepository {
         });
     }
 
+    findManyByUserId(userId: string): Promise<Feeder[]> {
+        return this.prisma.feeder.findMany({
+            where: { userFeeders: { some: { userId } } },
+        });
+    }
+
     findAll(): Promise<Feeder[]> {
         return this.prisma.feeder.findMany();
     }
