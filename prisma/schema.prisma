@@ -120,7 +120,7 @@ model CatEmbedding {
   id        String   @id @default(uuid())
   catId     String
   
-  embedding Unsupported("vector(768)")? 
+  embedding Unsupported("vector(1000)")? 
   imageUrl  String? 
   
   createdAt DateTime @default(now())

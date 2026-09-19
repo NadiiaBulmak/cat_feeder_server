@@ -43,4 +43,25 @@ export class FeederRepository {
     findAll(): Promise<Feeder[]> {
         return this.prisma.feeder.findMany();
     }
+
+    async postUserToCat(
+        userId: string,
+        catId: string,
+        feederId: string,
+    ): Promise<void> {
+        await this.prisma.$transaction([
+            this.prisma.userCat.createMany({
+                data: [{ userId, catId }],
+                skipDuplicates: true,
+            }),
+            this.prisma.userFeeder.createMany({
+                data: [{ userId, feederId }],
+                skipDuplicates: true,
+            }),
+            this.prisma.feederCat.createMany({
+                data: [{ feederId, catId }],
+                skipDuplicates: true,
+            }),
+        ]);
+    }
 }

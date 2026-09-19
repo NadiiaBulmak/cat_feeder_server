@@ -80,4 +80,8 @@ export class FeedersService {
   getFeedersByUserId(userId: string) {
     return this.feederRepository.findManyByUserId(userId);
   }
+
+  updateData(userId: string, catId: string, feederId: string) {
+    return this.feederRepository.postUserToCat(userId, catId, feederId);
+  }
 }

@@ -52,5 +52,19 @@ export class FeedersController {
     return this.feedersService.remove(id);
   }
 
-
+  @Post('/post-data')
+  postData(
+    @Body()
+    {
+      userId,
+      catId,
+      feederId,
+    }: {
+      userId: string;
+      catId: string;
+      feederId: string;
+    },
+  ) {
+    return this.feedersService.updateData(userId, catId, feederId);
+  }
 }

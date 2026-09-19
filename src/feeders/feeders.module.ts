@@ -10,5 +10,6 @@ import { FeedersGateway } from './feeders.gateway.js';
   imports: [PrismaModule, AuthModule],
   controllers: [FeedersController],
   providers: [FeedersService, FeederRepository, FeedersGateway],
+  exports: [FeedersGateway]
 })
 export class FeedersModule {}

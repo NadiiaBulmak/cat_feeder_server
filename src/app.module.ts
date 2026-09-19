@@ -8,6 +8,7 @@ import { FeedersModule } from './feeders/feeders.module.js';
 import { AppController } from './app.controller.js';
 import { CameraController } from './camera/camera.controller.js';
 import { AppService } from './app.service.js';
+import { RecognitionModule } from './recognition/recognition.module.js';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AppService } from './app.service.js';
     UsersModule,
     FeedersModule,
     AuthModule,
+    RecognitionModule,
   ],
   controllers: [AppController, CameraController],
   providers: [AppService],
