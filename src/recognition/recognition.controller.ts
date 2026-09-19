@@ -75,6 +75,17 @@ export class RecognitionController {
       }),
     }),
   )
+  @Post('identify')
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: diskStorage({
+        destination: './uploads/attempts',
+        filename: (req, file, cb) => {
+          cb(null, `attempt_${Date.now()}${path.extname(file.originalname)}`);
+        },
+      }),
+    }),
+  )
   async identifyIncomingCat(
     @UploadedFile() file: Express.Multer.File,
     @Query('deviceId') deviceId: string,
@@ -116,7 +127,7 @@ export class RecognitionController {
           data: {
             feederId: feeder.id,
             catId: match.catId,
-            eventType: EventType.IDENTIFICATION_FAILED, // Або інший тип на ваш вибір
+            eventType: EventType.IDENTIFICATION_FAILED,
             confidence: match.similarity,
             metadata: { reason: 'ACCESS_DENIED', image: file.filename },
           },
@@ -129,14 +140,21 @@ export class RecognitionController {
         };
       }
 
-      // 4. ДОСТУП ДОЗВОЛЕНО: Відправляємо команду по сокетах (по deviceId)
+      // 4. ДОСТУП ДОЗВОЛЕНО: Оновлюємо бажаний стан (desiredState) у базі
+      // Це гарантує, що при втраті/відновленні Wi-Fi плата одразу відкриється знову
+      await this.prisma.feeder.update({
+        where: { id: feeder.id },
+        data: { desiredState: FeederState.OPEN },
+      });
+
+      // 5. Відправляємо команду по сокетах в реальному часі (по deviceId)
       const isSent = this.feedersGateway.sendCommandToDevice(
         feeder.deviceId, // Для сокетів юзаємо ESP_001
         FeederState.OPEN,
         match.catId,
       );
 
-      // 5. ЗАПИСУЄМО УСПІШНУ ПОДІЮ В ІСТОРІЮ
+      // 6. ЗАПИСУЄМО УСПІШНУ ПОДІЮ В ІСТОРІЮ
       await this.prisma.feedingEvent.create({
         data: {
           feederId: feeder.id, // UUID для зв'язку в базі

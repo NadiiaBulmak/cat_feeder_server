@@ -24,24 +24,31 @@ export class FeedersGateway
   private connectedDevices = new Map<string, WebSocket>();
   private readonly logger = new Logger(FeedersGateway.name);
 
-  handleConnection(client: WebSocket, request: IncomingMessage) {
+  async handleConnection(client: WebSocket, request: IncomingMessage) {
     try {
       const url = new URL(request.url || '', `http://${request.headers.host}`);
       const rawDeviceId = url.searchParams.get('deviceId');
 
       if (!rawDeviceId) {
-        this.logger.warn(
-          `[WS] Відхилено: Немає deviceId у параметрах (URL: ${request.url})`,
-        );
         client.close(1008, 'Device ID required');
         return;
       }
 
       const deviceId = rawDeviceId.trim();
       this.connectedDevices.set(deviceId, client);
-      this.logger.log(
-        `[WS] ✅ Пристрій підключено: [${deviceId}]. Всього: ${this.connectedDevices.size}`,
-      );
+
+      // 🔄 НОВЕ: Одразу читаємо desiredState з бази і відправляємо на пристрій
+      const feeder = await this.prisma.feeder.findUnique({
+        where: { deviceId },
+        select: { desiredState: true }, // Нам потрібен лише цільовий стан
+      });
+
+      if (feeder) {
+        client.send(JSON.stringify({ command: feeder.desiredState }));
+        this.logger.log(
+          `🔄 Синхронізація: Відправлено стан ${feeder.desiredState} на [${deviceId}]`,
+        );
+      }
 
       // Обробка вхідних повідомлень від ESP8266/NodeMCU
       client.on('message', async (message: Buffer) => {
