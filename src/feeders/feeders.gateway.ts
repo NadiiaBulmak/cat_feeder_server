@@ -73,7 +73,7 @@ export class FeedersGateway
                 `🔄 Годівничка [${deviceId}] підтвердила статус: ${data.state}`,
               );
             }
-            
+
             if (data.event === 'CAT_LEFT') {
               this.logger.log(
                 `📡 ІЧ-датчик: Кіт відійшов від годівнички [${deviceId}]`,
@@ -103,7 +103,6 @@ export class FeedersGateway
 
               this.logger.log(`✅ Команду CLOSED відправлено на [${deviceId}]`);
             }
-
           } catch (e) {
             this.logger.error(
               `[WS] Помилка обробки JSON від [${deviceId}]:`,
@@ -131,7 +130,7 @@ export class FeedersGateway
 
   sendCommandToDevice(
     deviceId: string,
-    command: 'OPEN' | 'CLOSED',
+    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT',
     catId?: string,
   ): boolean {
     const cleanDeviceId = deviceId.trim();
@@ -153,7 +152,7 @@ export class FeedersGateway
     }
 
     this.logger.warn(
-      `⚠️ Пристрій [${cleanDeviceId}] не знайдено або він офлайн`,
+      `⚠️ Пристрій [${cleanDeviceId}] не знайдено або він офлайн. Перевірте, чи підключена ESP32-CAM.`,
     );
     return false;
   }

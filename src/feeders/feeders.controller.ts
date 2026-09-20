@@ -11,8 +11,9 @@ import {
   NotFoundException,
   Logger,
   InternalServerErrorException,
+  Req,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import axios from 'axios';
 import { FeedersService } from './feeders.service.js';
 import { CreateFeederDto } from './dto/create-feeder.dto.js';
@@ -21,13 +22,16 @@ import { FeederAction } from '../shared/enums.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/strategy/jwt-auth.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { FeedersGateway } from './feeders.gateway.js';
 
 @Controller('feeders')
 export class FeedersController {
   private readonly logger = new Logger(FeedersController.name);
+  private pendingSnapshots = new Map<string, (image: Buffer) => void>();
   constructor(
     private readonly feedersService: FeedersService,
     private prisma: PrismaService,
+    private feedersGateway: FeedersGateway,
   ) {}
 
   @Post()
@@ -84,46 +88,70 @@ export class FeedersController {
     @Param('deviceId') deviceId: string,
     @Res() res: Response,
   ) {
-    const feeder = await this.prisma.feeder.findUnique({
-      where: { deviceId },
-      include: { cameras: true },
-    });
+    const cameraDeviceId = `${deviceId}`;
 
-    if (!feeder) {
-      throw new NotFoundException(`Годівничку ${deviceId} не знайдено`);
-    }
+    const isSent = this.feedersGateway.sendCommandToDevice(
+      cameraDeviceId,
+      'TAKE_SNAPSHOT',
+    );
 
-    if (!feeder.cameras || feeder.cameras.length === 0) {
-      throw new NotFoundException(
-        `До годівнички ${deviceId} не прив'язано жодної камери`,
+    if (!isSent) {
+      throw new InternalServerErrorException(
+        'Камера зараз не в мережі (Offline)',
       );
     }
 
-    const cameraIp = feeder.cameras[0].ipAddress;
-    console.log(cameraIp)
+    this.logger.log(`Команду на знімок відправлено камері: ${cameraDeviceId}`);
 
     try {
-      this.logger.log(`Запитуємо знімок у камери: http://${cameraIp}/capture`);
+      const imageBuffer = await new Promise<Buffer>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingSnapshots.delete(deviceId);
+          reject(new Error('Камера не надіслала фото вчасно'));
+        }, 8000);
 
-      const response = await axios.get(`http://${cameraIp}/capture`, {
-        responseType: 'arraybuffer',
-        timeout: 5000,
+        this.pendingSnapshots.set(deviceId, (buffer) => {
+          clearTimeout(timeout);
+          resolve(buffer);
+        });
       });
 
       res.set({
         'Content-Type': 'image/jpeg',
-        'Content-Length': response.data.length,
+        'Content-Length': imageBuffer.length,
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       });
-
-      res.send(response.data);
+      res.send(imageBuffer);
     } catch (error) {
-      this.logger.error(
-        `Помилка отримання знімка з камери ${cameraIp}`,
-      );
-      throw new InternalServerErrorException(
-        "Не вдалося зв'язатися з камерою. Перевірте, чи вона увімкнена.",
-      );
+      this.logger.error(error);
+      throw new InternalServerErrorException(error);
     }
+  }
+
+  @Post(':deviceId/upload-snapshot')
+  async uploadSnapshot(
+    @Param('deviceId') deviceId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const chunks: Buffer[] = [];
+
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+
+    req.on('end', () => {
+      const imageBuffer = Buffer.concat(chunks);
+      this.logger.log(
+        `Отримано фото від камери ${deviceId}. Розмір: ${imageBuffer.length} байт`,
+      );
+
+      const resolveWaitingRequest = this.pendingSnapshots.get(deviceId);
+
+      if (resolveWaitingRequest) {
+        resolveWaitingRequest(imageBuffer);
+        this.pendingSnapshots.delete(deviceId);
+      }
+
+      res.status(200).send({ success: true });
+    });
   }
 }
