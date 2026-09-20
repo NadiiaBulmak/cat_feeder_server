@@ -10,8 +10,8 @@ import type { IncomingMessage } from 'http';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
+import { EventType } from '@prisma/client';
 
-// ws://localhost:3000/ws/device
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
   implements OnGatewayConnection, OnGatewayDisconnect
@@ -20,7 +20,6 @@ export class FeedersGateway
   server: Server;
   constructor(private prisma: PrismaService) {}
 
-  // Пул з'єднань: Map<deviceId, WebSocket>
   private connectedDevices = new Map<string, WebSocket>();
   private readonly logger = new Logger(FeedersGateway.name);
 
@@ -37,10 +36,9 @@ export class FeedersGateway
       const deviceId = rawDeviceId.trim();
       this.connectedDevices.set(deviceId, client);
 
-      // 🔄 НОВЕ: Одразу читаємо desiredState з бази і відправляємо на пристрій
       const feeder = await this.prisma.feeder.findUnique({
         where: { deviceId },
-        select: { desiredState: true }, // Нам потрібен лише цільовий стан
+        select: { desiredState: true },
       });
 
       if (feeder) {
@@ -50,27 +48,22 @@ export class FeedersGateway
         );
       }
 
-      // Обробка вхідних повідомлень від ESP8266/NodeMCU
       client.on('message', async (message: Buffer) => {
         const msg = message.toString().trim();
 
-        // 1. Обробка Heartbeat (пінгів)
         if (msg === 'ping') {
           client.send('pong');
-          return; // Виходимо, щоб не парсити 'ping' як JSON
+          return;
         }
 
-        // 2. Обробка JSON (Зміна стану, RFID тощо)
         if (msg.startsWith('{')) {
           try {
             const data = JSON.parse(msg);
 
-            // Якщо прийшла подія про зміну стану механізму
             if (data.event === 'STATE_CHANGED' && data.state) {
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
 
-              // Оновлюємо actualState у базі даних
               await this.prisma.feeder.update({
                 where: { deviceId: deviceId },
                 data: { actualState: newState },
@@ -80,8 +73,37 @@ export class FeedersGateway
                 `🔄 Годівничка [${deviceId}] підтвердила статус: ${data.state}`,
               );
             }
+            
+            if (data.event === 'CAT_LEFT') {
+              this.logger.log(
+                `📡 ІЧ-датчик: Кіт відійшов від годівнички [${deviceId}]`,
+              );
 
-            // ТУТ в майбутньому можна обробляти data.event === 'RFID_SCANNED'
+              const feeder = await this.prisma.feeder.findUnique({
+                where: { deviceId: deviceId },
+              });
+
+              if (feeder) {
+                await this.prisma.feeder.update({
+                  where: { id: feeder.id },
+                  data: { desiredState: FeederState.CLOSED },
+                });
+
+                await this.prisma.feedingEvent.create({
+                  data: {
+                    feederId: feeder.id,
+                    eventType: EventType.FEEDER_CLOSED,
+                    metadata: { reason: 'IR_SENSOR_CLEAR' },
+                  },
+                });
+              }
+
+              const payload = { command: 'CLOSED' };
+              client.send(JSON.stringify(payload));
+
+              this.logger.log(`✅ Команду CLOSED відправлено на [${deviceId}]`);
+            }
+
           } catch (e) {
             this.logger.error(
               `[WS] Помилка обробки JSON від [${deviceId}]:`,
@@ -96,7 +118,6 @@ export class FeedersGateway
   }
 
   handleDisconnect(client: WebSocket) {
-    // Шукаємо, який пристрій відключився, і видаляємо його з пулу
     for (const [deviceId, socket] of this.connectedDevices.entries()) {
       if (socket === client) {
         this.connectedDevices.delete(deviceId);
@@ -108,8 +129,6 @@ export class FeedersGateway
     }
   }
 
-  // Об'єднаний метод: відправляє команду конкретному пристрою + передає ім'я котика
-  // Змінили catName на catId
   sendCommandToDevice(
     deviceId: string,
     command: 'OPEN' | 'CLOSED',
@@ -124,8 +143,6 @@ export class FeedersGateway
     );
 
     if (client && client.readyState === 1) {
-      // 1 = WebSocket.OPEN
-      // Тепер відправляємо catId замість cat
       const payload = { command, catId };
       client.send(JSON.stringify(payload));
 
