@@ -1,40 +1,31 @@
-import { Injectable, Logger } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 
 @Injectable()
 export class CameraService {
   private readonly logger = new Logger(CameraService.name);
-  private readonly cameraUrl = 'http://192.168.100.26/capture';
+  
+  // Беремо URL з .env, або залишаємо ваш локальний як fallback
+  private readonly cameraUrl = process.env.CAMERA_URL ?? 'http://192.168.100.26/capture';
 
-  async takePhoto(): Promise<string> {
-    this.logger.log(`📸 Робимо запит до камери: ${this.cameraUrl}`);
+  async getSnapshotBuffer(deviceId: string): Promise<Buffer> {
+    this.logger.log(`📸 Запит до камери пристрою [${deviceId}]: ${this.cameraUrl}`);
     
     try {
       const response = await fetch(this.cameraUrl);
       
       if (!response.ok) {
-        throw new Error(`Камера повернула помилку: ${response.status}`);
+        throw new Error(`Камера повернула статус: ${response.status}`);
       }
 
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      const uploadDir = path.join(process.cwd(), 'uploads');
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir);
-      }
-
-      const filename = `cat_${Date.now()}.jpg`;
-      const filepath = path.join(uploadDir, filename);
-
-      fs.writeFileSync(filepath, buffer);
-      this.logger.log(`✅ Фото успішно збережено: ${filepath}`);
-
-      return filename;
+      this.logger.log(`✅ Фото успішно завантажено в пам'ять (${buffer.length} байт)`);
+      return buffer;
+      
     } catch (error) {
-      this.logger.error('❌ Помилка під час фотографування', error);
-      throw error;
+      this.logger.error('❌ Помилка зв\'язку з камерою', error);
+      throw new InternalServerErrorException('Не вдалося отримати знімок з камери');
     }
   }
 }

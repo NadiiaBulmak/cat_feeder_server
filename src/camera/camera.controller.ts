@@ -1,21 +1,30 @@
-import { Controller, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Res, UseGuards, HttpStatus } from '@nestjs/common';
+import type { Response } from 'express';
 import { CameraService } from './camera.service.js';
 import { JwtAuthGuard } from '../auth/strategy/jwt-auth.guard.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
 @Controller('camera')
 export class CameraController {
   constructor(private readonly cameraService: CameraService) {}
 
-  @UseGuards(JwtAuthGuard)
-  @Post('trigger')
-  async triggerCamera(@CurrentUser() user: any) {
-    console.log(`📸 Користувач ${user.email} запросив фото`);
-    const filename = await this.cameraService.takePhoto();
-    return { 
-      success: true, 
-      message: 'Фото зроблено!',
-      file: filename 
-    };
+  // Закоментуйте @UseGuards на час тестування, якщо фронтенд ще не передає токен
+  // @UseGuards(JwtAuthGuard) 
+  @Get(':deviceId/snapshot')
+  async getSnapshot(@Param('deviceId') deviceId: string, @Res() res: Response) {
+    try {
+      const buffer = await this.cameraService.getSnapshotBuffer(deviceId);
+      
+      // Встановлюємо заголовки, щоб браузер розумів, що це картинка, і не кешував її
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      
+      // Відправляємо байти напряму
+      res.send(buffer);
+    } catch (error) {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE).json({ 
+        success: false, 
+        message: 'Камера недоступна або вимкнена' 
+      });
+    }
   }
 }
