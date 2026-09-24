@@ -5,7 +5,7 @@ export class CameraService {
   private readonly logger = new Logger(CameraService.name);
   
   // Беремо URL з .env, або залишаємо ваш локальний як fallback
-  private readonly cameraUrl = process.env.CAMERA_URL ?? 'http://192.168.100.26/capture';
+  private readonly cameraUrl = process.env.CAMERA_URL!;
 
   async getSnapshotBuffer(deviceId: string): Promise<Buffer> {
     this.logger.log(`📸 Запит до камери пристрою [${deviceId}]: ${this.cameraUrl}`);
