@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { FeedersGateway } from '../feeders/feeders.gateway.js';
 import { StorageService } from '../storage/storage.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { EventType } from '@prisma/client';
 
 @Injectable()
 export class CameraService {
@@ -13,9 +15,13 @@ export class CameraService {
   private readonly cameraUrl = process.env.CAMERA_URL!;
   private pendingSnapshots = new Map<string, (image: Buffer) => void>();
 
+  private lastAutoSnapshotTime = new Map<string, number>();
+  private readonly AUTO_SNAPSHOT_COOLDOWN_MS = 5000;
+
   constructor(
     private readonly feedersGateway: FeedersGateway,
     private readonly storageService: StorageService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private getCameraId(deviceId: string): string {
@@ -65,14 +71,74 @@ export class CameraService {
     }
   }
 
-  async captureAndSaveToCloud(deviceId: string, folder: string = 'reference'): Promise<string> {
-    this.logger.log(`☁️ Початок процесу збереження фото в хмару для [${deviceId}]`);
-    
+  async captureAndSaveToCloud(
+    deviceId: string,
+    folder: string = 'reference',
+  ): Promise<string> {
+    this.logger.log(
+      `☁️ Початок процесу збереження фото в хмару для [${deviceId}]`,
+    );
+
     const imageBuffer = await this.getLiveSnapshotBuffer(deviceId);
-    
-    const publicUrl = await this.storageService.uploadImage(imageBuffer, deviceId);
-    
+
+    const publicUrl = await this.storageService.uploadImage(
+      imageBuffer,
+      deviceId,
+    );
+
     return publicUrl;
   }
-  
+  async triggerAutoSnapshot(deviceId: string): Promise<string | null> {
+    const cleanId = deviceId.trim();
+    const now = Date.now();
+    const lastTime = this.lastAutoSnapshotTime.get(cleanId) || 0;
+
+    if (now - lastTime < this.AUTO_SNAPSHOT_COOLDOWN_MS) {
+      const remaining = Math.ceil(
+        (this.AUTO_SNAPSHOT_COOLDOWN_MS - (now - lastTime)) / 1000,
+      );
+      this.logger.warn(
+        `⏳ [${cleanId}] Пропущено авто-знімок: зачекайте ще ${remaining} сек.`,
+      );
+      return null;
+    }
+
+    this.lastAutoSnapshotTime.set(cleanId, now);
+
+    try {
+      this.logger.log(`📸 Автоматичний знімок для пристрою [${cleanId}]...`);
+
+      const imageBuffer = await this.getLiveSnapshotBuffer(cleanId);
+      const folderName = `auto-snapshots/${cleanId}`;
+      const photoUrl = await this.storageService.uploadImage(
+        imageBuffer,
+        folderName,
+      );
+
+      const feeder = await this.prisma.feeder.findUnique({
+        where: { deviceId: cleanId },
+      });
+
+      if (feeder) {
+        await this.prisma.feedingEvent.create({
+          data: {
+            feederId: feeder.id,
+            eventType: EventType.CAT_DETECTED,
+            metadata: { photoUrl, trigger: 'IR_SENSOR' },
+          },
+        });
+      }
+
+      this.logger.log(
+        `✅ Авто-знімок успішно збережено в БД та R2: ${photoUrl}`,
+      );
+      return photoUrl;
+    } catch (error) {
+      this.logger.error(
+        `❌ Помилка створення авто-знімка для [${cleanId}]:`,
+        error,
+      );
+      return null;
+    }
+  }
 }

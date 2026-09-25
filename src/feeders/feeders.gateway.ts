@@ -7,10 +7,11 @@ import {
 import { WebSocket } from 'ws';
 import type { Server } from 'ws';
 import type { IncomingMessage } from 'http';
-import { Logger } from '@nestjs/common';
+import { forwardRef, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
 import { EventType } from '@prisma/client';
+import { CameraService } from '../camera/camera.service.js';
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -18,7 +19,11 @@ export class FeedersGateway
 {
   @WebSocketServer()
   server: Server;
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => CameraService))
+    private cameraService: CameraService,
+  ) {}
 
   private connectedDevices = new Map<string, WebSocket>();
   private readonly logger = new Logger(FeedersGateway.name);
@@ -60,6 +65,7 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
+            // 1. Оновлення стану дверцят
             if (data.event === 'STATE_CHANGED' && data.state) {
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
@@ -74,6 +80,17 @@ export class FeedersGateway
               );
             }
 
+            // 2. ПОДІЯ: Кіт підійшов до годівнички (Авто-знімок)
+            if (data.event === 'CAT_APPROACHED') {
+              this.logger.log(
+                `🐾 ІЧ-датчик: Кіт підійшов до годівнички [${deviceId}]`,
+              );
+
+              // Запускаємо фоновий автоматичний знімок
+              void this.cameraService.triggerAutoSnapshot(deviceId);
+            }
+
+            // 3. ПОДІЯ: Кіт відійшов від годівнички
             if (data.event === 'CAT_LEFT') {
               this.logger.log(
                 `📡 ІЧ-датчик: Кіт відійшов від годівнички [${deviceId}]`,
@@ -128,18 +145,19 @@ export class FeedersGateway
     }
   }
 
-sendCommandToDevice(
+  sendCommandToDevice(
     deviceId: string,
     command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT', // Або 'CLOSE' залежно від вашого коду
     catId?: string,
   ): boolean {
     const cleanDeviceId = deviceId.trim();
-    
+
     // МАРШРУТИЗАЦІЯ: Якщо це команда для камери, додаємо суфікс "-camera"
     // (перевіряємо, щоб не додати його двічі, якщо хтось передасть ID вже з суфіксом)
-    const targetDeviceId = (command === 'TAKE_SNAPSHOT' && !cleanDeviceId.endsWith('-camera')) 
-      ? `${cleanDeviceId}-camera` 
-      : cleanDeviceId;
+    const targetDeviceId =
+      command === 'TAKE_SNAPSHOT' && !cleanDeviceId.endsWith('-camera')
+        ? `${cleanDeviceId}-camera`
+        : cleanDeviceId;
 
     const client = this.connectedDevices.get(targetDeviceId);
 
@@ -148,7 +166,8 @@ sendCommandToDevice(
       `📋 Доступні пристрої онлайн: ${Array.from(this.connectedDevices.keys()).join(', ') || 'пусто'}`,
     );
 
-    if (client && client.readyState === 1) { // 1 = WebSocket.OPEN
+    if (client && client.readyState === 1) {
+      // 1 = WebSocket.OPEN
       const payload = { command, catId };
       client.send(JSON.stringify(payload));
 
