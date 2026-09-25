@@ -107,11 +107,7 @@ export class FeedersGateway
               });
 
               if (feeder) {
-                await this.prisma.feeder.update({
-                  where: { id: feeder.id },
-                  data: { desiredState: FeederState.CLOSED },
-                });
-
+                // Записуємо подібну інформацію про закриття у журнал
                 await this.prisma.feedingEvent.create({
                   data: {
                     feederId: feeder.id,
@@ -119,12 +115,26 @@ export class FeedersGateway
                     metadata: { reason: 'IR_SENSOR_CLEAR' },
                   },
                 });
+
+                // ЗАКРИВАЄМО ТІЛЬКИ ЯКЩО годівничка не була відкрита вручну з дашборду!
+                // Якщо desiredState вже є OPEN (натиснуто з сайту), ми не перебиваємо команду користувача.
+                if (feeder.desiredState !== FeederState.OPEN) {
+                  await this.prisma.feeder.update({
+                    where: { id: feeder.id },
+                    data: { desiredState: FeederState.CLOSED },
+                  });
+
+                  const payload = { command: 'CLOSED' };
+                  client.send(JSON.stringify(payload));
+                  this.logger.log(
+                    `✅ Авто-закриття (CAT_LEFT) відправлено на [${deviceId}]`,
+                  );
+                } else {
+                  this.logger.log(
+                    `ℹ️ [${deviceId}] залишається OPEN, бо відкрита вручну з дашборду.`,
+                  );
+                }
               }
-
-              const payload = { command: 'CLOSED' };
-              client.send(JSON.stringify(payload));
-
-              this.logger.log(`✅ Команду CLOSED відправлено на [${deviceId}]`);
             }
           } catch (e) {
             this.logger.error(
