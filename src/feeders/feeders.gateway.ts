@@ -7,11 +7,12 @@ import {
 import { WebSocket } from 'ws';
 import type { Server } from 'ws';
 import type { IncomingMessage } from 'http';
-import { forwardRef, Inject, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
 import { EventType } from '@prisma/client';
-import { CameraService } from '../camera/camera.service.js';
+import type { CameraService } from '../camera/camera.service.js';
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -19,14 +20,23 @@ export class FeedersGateway
 {
   @WebSocketServer()
   server: Server;
-  constructor(
-    private prisma: PrismaService,
-    @Inject(forwardRef(() => CameraService))
-    private cameraService: CameraService,
-  ) {}
 
   private connectedDevices = new Map<string, WebSocket>();
   private readonly logger = new Logger(FeedersGateway.name);
+  private cameraService: CameraService | null = null;
+
+  constructor(
+    private prisma: PrismaService,
+    private moduleRef: ModuleRef,
+  ) {}
+
+  private getCameraService(): CameraService {
+    if (!this.cameraService) {
+      const { CameraService } = require('../camera/camera.service.js');
+      this.cameraService = this.moduleRef.get(CameraService, { strict: false });
+    }
+    return this.cameraService!;
+  }
 
   async handleConnection(client: WebSocket, request: IncomingMessage) {
     try {
@@ -65,7 +75,6 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
-            // 1. Оновлення стану дверцят
             if (data.event === 'STATE_CHANGED' && data.state) {
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
@@ -80,17 +89,14 @@ export class FeedersGateway
               );
             }
 
-            // 2. ПОДІЯ: Кіт підійшов до годівнички (Авто-знімок)
             if (data.event === 'CAT_APPROACHED') {
               this.logger.log(
                 `🐾 ІЧ-датчик: Кіт підійшов до годівнички [${deviceId}]`,
               );
 
-              // Запускаємо фоновий автоматичний знімок
-              void this.cameraService.triggerAutoSnapshot(deviceId);
+              void this.getCameraService().triggerAutoSnapshot(deviceId);
             }
 
-            // 3. ПОДІЯ: Кіт відійшов від годівнички
             if (data.event === 'CAT_LEFT') {
               this.logger.log(
                 `📡 ІЧ-датчик: Кіт відійшов від годівнички [${deviceId}]`,
@@ -147,13 +153,11 @@ export class FeedersGateway
 
   sendCommandToDevice(
     deviceId: string,
-    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT', // Або 'CLOSE' залежно від вашого коду
+    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT',
     catId?: string,
   ): boolean {
     const cleanDeviceId = deviceId.trim();
 
-    // МАРШРУТИЗАЦІЯ: Якщо це команда для камери, додаємо суфікс "-camera"
-    // (перевіряємо, щоб не додати його двічі, якщо хтось передасть ID вже з суфіксом)
     const targetDeviceId =
       command === 'TAKE_SNAPSHOT' && !cleanDeviceId.endsWith('-camera')
         ? `${cleanDeviceId}-camera`
@@ -163,11 +167,12 @@ export class FeedersGateway
 
     this.logger.log(`📡 Запит команди [${command}] до: [${targetDeviceId}]`);
     this.logger.log(
-      `📋 Доступні пристрої онлайн: ${Array.from(this.connectedDevices.keys()).join(', ') || 'пусто'}`,
+      `📋 Доступні пристрої онлайн: ${
+        Array.from(this.connectedDevices.keys()).join(', ') || 'пусто'
+      }`,
     );
 
     if (client && client.readyState === 1) {
-      // 1 = WebSocket.OPEN
       const payload = { command, catId };
       client.send(JSON.stringify(payload));
 
