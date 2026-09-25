@@ -9,6 +9,7 @@ import { AppController } from './app.controller.js';
 import { CameraController } from './camera/camera.controller.js';
 import { AppService } from './app.service.js';
 import { RecognitionModule } from './recognition/recognition.module.js';
+import { StorageModule } from './storage/storage.module.js';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { RecognitionModule } from './recognition/recognition.module.js';
     FeedersModule,
     AuthModule,
     RecognitionModule,
+    StorageModule,
   ],
   controllers: [AppController, CameraController],
   providers: [AppService],
