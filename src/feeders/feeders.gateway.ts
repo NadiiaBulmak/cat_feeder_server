@@ -128,31 +128,38 @@ export class FeedersGateway
     }
   }
 
-  sendCommandToDevice(
+sendCommandToDevice(
     deviceId: string,
-    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT',
+    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT', // Або 'CLOSE' залежно від вашого коду
     catId?: string,
   ): boolean {
     const cleanDeviceId = deviceId.trim();
-    const client = this.connectedDevices.get(cleanDeviceId);
+    
+    // МАРШРУТИЗАЦІЯ: Якщо це команда для камери, додаємо суфікс "-camera"
+    // (перевіряємо, щоб не додати його двічі, якщо хтось передасть ID вже з суфіксом)
+    const targetDeviceId = (command === 'TAKE_SNAPSHOT' && !cleanDeviceId.endsWith('-camera')) 
+      ? `${cleanDeviceId}-camera` 
+      : cleanDeviceId;
 
-    this.logger.log(`📡 Запит до: [${cleanDeviceId}]`);
+    const client = this.connectedDevices.get(targetDeviceId);
+
+    this.logger.log(`📡 Запит команди [${command}] до: [${targetDeviceId}]`);
     this.logger.log(
       `📋 Доступні пристрої онлайн: ${Array.from(this.connectedDevices.keys()).join(', ') || 'пусто'}`,
     );
 
-    if (client && client.readyState === 1) {
+    if (client && client.readyState === 1) { // 1 = WebSocket.OPEN
       const payload = { command, catId };
       client.send(JSON.stringify(payload));
 
       this.logger.log(
-        `✅ Відправлено ${JSON.stringify(payload)} на пристрій [${cleanDeviceId}]`,
+        `✅ Відправлено ${JSON.stringify(payload)} на пристрій [${targetDeviceId}]`,
       );
       return true;
     }
 
     this.logger.warn(
-      `⚠️ Пристрій [${cleanDeviceId}] не знайдено або він офлайн. Перевірте, чи підключена ESP32-CAM.`,
+      `⚠️ Пристрій [${targetDeviceId}] не знайдено або він офлайн. Перевірте, чи підключена плата.`,
     );
     return false;
   }
