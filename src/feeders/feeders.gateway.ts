@@ -22,7 +22,6 @@ export class FeedersGateway
   server: Server;
 
   private connectedDevices = new Map<string, WebSocket>();
-  // 📸 Карта для збереження активних таймерів циклічної фотофіксації (кожні 10 сек)
   private photoIntervals = new Map<string, NodeJS.Timeout>();
 
   private readonly logger = new Logger(FeedersGateway.name);
@@ -41,7 +40,6 @@ export class FeedersGateway
     return this.cameraService!;
   }
 
-  // ⏹️ Допоміжна функція зупинки інтервалу фотографій
   private stopPhotoInterval(deviceId: string) {
     if (this.photoIntervals.has(deviceId)) {
       clearInterval(this.photoIntervals.get(deviceId)!);
@@ -50,9 +48,7 @@ export class FeedersGateway
     }
   }
 
-  // ▶️ Допоміжна функція запуску інтервалу фотографій (кожні 10 секунд)
   private startPhotoInterval(deviceId: string) {
-    // Якщо таймер вже запущено для цього пристрою — не дублюємо
     if (this.photoIntervals.has(deviceId)) return;
 
     this.logger.log(
@@ -65,7 +61,7 @@ export class FeedersGateway
     // Запускаємо повтор кожні 10 000 мс (10 сек)
     const interval = setInterval(() => {
       this.logger.log(
-        `📸 10-секундний інтервал: Робимо повторний знімок [${deviceId}]`,
+        `📸 10-секундний інтервал: Робимо повторний знімок кота [${deviceId}]`,
       );
       void this.getCameraService().triggerAutoSnapshot(deviceId);
     }, 10000);
@@ -107,7 +103,7 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
-            // 1. ЗМІНА СТАТУСУ (підтвердження відкриття/закриття від NodeMCU)
+            // 1. Зміна статусу (підтвердження від NodeMCU)
             if (data.event === 'STATE_CHANGED' && data.state) {
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
@@ -117,11 +113,9 @@ export class FeedersGateway
                 data: { actualState: newState },
               });
 
-              // 📸 Якщо миска підтвердила ВІДКРИТТЯ — перевіряємо чи запускати фото
+              // 📸 Якщо миска повністю відкрилась — перевіряємо чи запускати циклічні фото
               if (newState === FeederState.OPEN) {
-                this.logger.log(
-                  `🔓 Годівничка [${deviceId}] повністю відкрита.`,
-                );
+                this.logger.log(`🔓 Годівничка [${deviceId}] повністю відкрита.`);
                 this.startPhotoInterval(deviceId);
               }
 
@@ -171,11 +165,10 @@ export class FeedersGateway
                 where: { deviceId },
               });
 
-              // 🎯 Якщо миска ВІДКРИТА або В ПРОЦЕСІ ВІДКРИТТЯ — запускаємо 10-сек фото
+              // 🎯 Запускаємо 10-секундні фото, якщо миска ВІДКРИТА або В ПРОЦЕСІ ВІДКРИТТЯ
               if (
                 feeder &&
-                (feeder.actualState === FeederState.OPEN ||
-                  feeder.desiredState === FeederState.OPEN)
+                (feeder.actualState === FeederState.OPEN || feeder.desiredState === FeederState.OPEN)
               ) {
                 this.startPhotoInterval(deviceId);
               } else {
@@ -190,7 +183,7 @@ export class FeedersGateway
                 `📡 VL53L0X: Кіт відійшов від миски [${deviceId}]`,
               );
 
-              // 🛑 1. Одразу зупиняємо 10-секундний інтервал фото
+              // 🛑 1. Одразу зупиняємо 10-секундний інтервал фотофіксації
               this.stopPhotoInterval(deviceId);
 
               const feeder = await this.prisma.feeder.findUnique({
@@ -198,7 +191,7 @@ export class FeedersGateway
               });
 
               if (feeder) {
-                // 📝 2. Фіксуємо закриття в базі
+                // 📝 2. Фіксуємо подію в базі даних
                 await this.prisma.feedingEvent.create({
                   data: {
                     feederId: feeder.id,
@@ -207,13 +200,13 @@ export class FeedersGateway
                   },
                 });
 
-                // 🔒 3. Оновлюємо желаний стан у базі
+                // 🔒 3. Змінюємо desiredState у БД на CLOSED
                 await this.prisma.feeder.update({
                   where: { id: feeder.id },
                   data: { desiredState: FeederState.CLOSED },
                 });
 
-                // ⏳ 4. Затримка 2 секунди перед відправкою команди на NodeMCU
+                // ⏳ 4. Невелика затримка (2 секунди) перед закриттям, щоб переконатися, що кіт дійсно пішов
                 setTimeout(() => {
                   client.send(JSON.stringify({ command: 'CLOSED' }));
                   this.logger.log(
@@ -235,21 +228,47 @@ export class FeedersGateway
   handleDisconnect(client: WebSocket) {
     for (const [deviceId, socket] of this.connectedDevices.entries()) {
       if (socket === client) {
-        this.stopPhotoInterval(deviceId); // При розриві зв'язку зупиняємо таймер фото
+        this.stopPhotoInterval(deviceId);
         this.connectedDevices.delete(deviceId);
         break;
       }
     }
   }
 
-  public async sendCommandToDevice(deviceId: string, command: string) {
-    const client = this.connectedDevices.get(deviceId);
-    if (client && client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ command }));
-      this.logger.log(`📤 Відправлено команду [${command}] на [${deviceId}]`);
+  sendCommandToDevice(
+    deviceId: string,
+    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT',
+    catId?: string,
+  ): boolean {
+    const cleanDeviceId = deviceId.trim();
+
+    const targetDeviceId =
+      command === 'TAKE_SNAPSHOT' && !cleanDeviceId.endsWith('-camera')
+        ? `${cleanDeviceId}-camera`
+        : cleanDeviceId;
+
+    const client = this.connectedDevices.get(targetDeviceId);
+
+    this.logger.log(`📡 Запит команди [${command}] до: [${targetDeviceId}]`);
+    this.logger.log(
+      `📋 Доступні пристрої онлайн: ${
+        Array.from(this.connectedDevices.keys()).join(', ') || 'пусто'
+      }`,
+    );
+
+    if (client && client.readyState === 1) {
+      const payload = { command, catId };
+      client.send(JSON.stringify(payload));
+
+      this.logger.log(
+        `✅ Відправлено ${JSON.stringify(payload)} на пристрій [${targetDeviceId}]`,
+      );
       return true;
     }
-    this.logger.warn(`⚠️ Пристрій [${deviceId}] не підключений до WebSocket`);
+
+    this.logger.warn(
+      `⚠️ Пристрій [${targetDeviceId}] не знайдено або він офлайн. Перевірте, чи підключена плата.`,
+    );
     return false;
   }
 }
