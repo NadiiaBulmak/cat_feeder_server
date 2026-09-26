@@ -1,4 +1,6 @@
 import {
+  forwardRef,
+  Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -19,7 +21,8 @@ export class CameraService {
   private readonly AUTO_SNAPSHOT_COOLDOWN_MS = 5000;
 
   constructor(
-    private readonly feedersGateway: FeedersGateway,
+    @Inject(forwardRef(() => FeedersGateway))
+    private readonly feedersGateway: Pick<FeedersGateway, 'sendCommandToDevice'>,
     private readonly storageService: StorageService,
     private readonly prisma: PrismaService,
   ) {}
@@ -88,6 +91,7 @@ export class CameraService {
 
     return publicUrl;
   }
+
   async triggerAutoSnapshot(deviceId: string): Promise<string | null> {
     const cleanId = deviceId.trim();
     const now = Date.now();

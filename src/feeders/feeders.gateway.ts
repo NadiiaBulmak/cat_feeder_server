@@ -7,12 +7,11 @@ import {
 import { WebSocket } from 'ws';
 import type { Server } from 'ws';
 import type { IncomingMessage } from 'http';
-import { Logger } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
+import { forwardRef, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
 import { EventType } from '@prisma/client';
-import type { CameraService } from '../camera/camera.service.js';
+import { CameraService } from '../camera/camera.service.js';
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -25,20 +24,12 @@ export class FeedersGateway
   private photoIntervals = new Map<string, NodeJS.Timeout>();
 
   private readonly logger = new Logger(FeedersGateway.name);
-  private cameraService: CameraService | null = null;
 
   constructor(
     private prisma: PrismaService,
-    private moduleRef: ModuleRef,
+    @Inject(forwardRef(() => CameraService))
+    private cameraService: Pick<CameraService, 'triggerAutoSnapshot'>,
   ) {}
-
-  private getCameraService(): CameraService {
-    if (!this.cameraService) {
-      const { CameraService } = require('../camera/camera.service.js');
-      this.cameraService = this.moduleRef.get(CameraService, { strict: false });
-    }
-    return this.cameraService!;
-  }
 
   private stopPhotoInterval(deviceId: string) {
     if (this.photoIntervals.has(deviceId)) {
@@ -55,15 +46,13 @@ export class FeedersGateway
       `📸 Запущено циклічну фотофіксацію (кожні 10 сек) для [${deviceId}]`,
     );
 
-    // Одразу робимо перше фото
-    void this.getCameraService().triggerAutoSnapshot(deviceId);
+    void this.cameraService.triggerAutoSnapshot(deviceId);
 
-    // Запускаємо повтор кожні 10 000 мс (10 сек)
     const interval = setInterval(() => {
       this.logger.log(
         `📸 10-секундний інтервал: Робимо повторний знімок кота [${deviceId}]`,
       );
-      void this.getCameraService().triggerAutoSnapshot(deviceId);
+      void this.cameraService.triggerAutoSnapshot(deviceId);
     }, 10000);
 
     this.photoIntervals.set(deviceId, interval);
@@ -103,7 +92,6 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
-            // 1. Зміна статусу (підтвердження від NodeMCU)
             if (data.event === 'STATE_CHANGED' && data.state) {
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
@@ -113,13 +101,11 @@ export class FeedersGateway
                 data: { actualState: newState },
               });
 
-              // 📸 Якщо миска повністю відкрилась — перевіряємо чи запускати циклічні фото
               if (newState === FeederState.OPEN) {
                 this.logger.log(`🔓 Годівничка [${deviceId}] повністю відкрита.`);
                 this.startPhotoInterval(deviceId);
               }
 
-              // ⏹️ Якщо закрилась — зупиняємо зйомку
               if (newState === FeederState.CLOSED) {
                 this.stopPhotoInterval(deviceId);
               }
@@ -129,7 +115,6 @@ export class FeedersGateway
               );
             }
 
-            // 2. ВІДКРИТТЯ ЗА RFID
             if (data.event === 'RFID_SCANNED' && data.tagValue) {
               this.logger.log(`🏷️ RFID [${data.tagValue}] на [${deviceId}]`);
 
@@ -155,7 +140,6 @@ export class FeedersGateway
               }
             }
 
-            // 3. ПОДІЯ: Кіт підійшов до миски (VL53L0X)
             if (data.event === 'CAT_APPROACHED') {
               this.logger.log(
                 `🐾 VL53L0X: Кіт поруч з мискою [${deviceId}] (Відстань: ${data.distance || 'N/A'} мм)`,
@@ -165,25 +149,21 @@ export class FeedersGateway
                 where: { deviceId },
               });
 
-              // 🎯 Запускаємо 10-секундні фото, якщо миска ВІДКРИТА або В ПРОЦЕСІ ВІДКРИТТЯ
               if (
                 feeder &&
                 (feeder.actualState === FeederState.OPEN || feeder.desiredState === FeederState.OPEN)
               ) {
                 this.startPhotoInterval(deviceId);
               } else {
-                // Якщо закрита — робимо 1 разове фото
-                void this.getCameraService().triggerAutoSnapshot(deviceId);
+                void this.cameraService.triggerAutoSnapshot(deviceId);
               }
             }
 
-            // 4. ПОДІЯ: Кіт відійшов від миски (VL53L0X)
             if (data.event === 'CAT_LEFT') {
               this.logger.log(
                 `📡 VL53L0X: Кіт відійшов від миски [${deviceId}]`,
               );
 
-              // 🛑 1. Одразу зупиняємо 10-секундний інтервал фотофіксації
               this.stopPhotoInterval(deviceId);
 
               const feeder = await this.prisma.feeder.findUnique({
@@ -191,7 +171,6 @@ export class FeedersGateway
               });
 
               if (feeder) {
-                // 📝 2. Фіксуємо подію в базі даних
                 await this.prisma.feedingEvent.create({
                   data: {
                     feederId: feeder.id,
@@ -200,13 +179,11 @@ export class FeedersGateway
                   },
                 });
 
-                // 🔒 3. Змінюємо desiredState у БД на CLOSED
                 await this.prisma.feeder.update({
                   where: { id: feeder.id },
                   data: { desiredState: FeederState.CLOSED },
                 });
 
-                // ⏳ 4. Невелика затримка (2 секунди) перед закриттям, щоб переконатися, що кіт дійсно пішов
                 setTimeout(() => {
                   client.send(JSON.stringify({ command: 'CLOSED' }));
                   this.logger.log(
