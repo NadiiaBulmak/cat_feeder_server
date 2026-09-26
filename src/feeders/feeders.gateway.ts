@@ -198,7 +198,7 @@ export class FeedersGateway
                       `⚠️ Не вдалося відправити CLOSED для [${deviceId}]: пристрій офлайн`,
                     );
                   }
-                }, 1500);
+                }, 30000);
               }
             }
           } catch (e) {
