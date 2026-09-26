@@ -102,7 +102,9 @@ export class FeedersGateway
               });
 
               if (newState === FeederState.OPEN) {
-                this.logger.log(`🔓 Годівничка [${deviceId}] повністю відкрита.`);
+                this.logger.log(
+                  `🔓 Годівничка [${deviceId}] повністю відкрита.`,
+                );
                 this.startPhotoInterval(deviceId);
               }
 
@@ -151,7 +153,8 @@ export class FeedersGateway
 
               if (
                 feeder &&
-                (feeder.actualState === FeederState.OPEN || feeder.desiredState === FeederState.OPEN)
+                (feeder.actualState === FeederState.OPEN ||
+                  feeder.desiredState === FeederState.OPEN)
               ) {
                 this.startPhotoInterval(deviceId);
               } else {
@@ -185,11 +188,17 @@ export class FeedersGateway
                 });
 
                 setTimeout(() => {
-                  client.send(JSON.stringify({ command: 'CLOSED' }));
-                  this.logger.log(
-                    `🔒 Надіслано команду CLOSED для [${deviceId}] (Кіт відійшов)`,
-                  );
-                }, 2000);
+                  const sent = this.sendCommandToDevice(deviceId, 'CLOSED');
+                  if (sent) {
+                    this.logger.log(
+                      `🔒 Надіслано команду CLOSED для [${deviceId}] (Кіт відійшов)`,
+                    );
+                  } else {
+                    this.logger.warn(
+                      `⚠️ Не вдалося відправити CLOSED для [${deviceId}]: пристрій офлайн`,
+                    );
+                  }
+                }, 1500);
               }
             }
           } catch (e) {
