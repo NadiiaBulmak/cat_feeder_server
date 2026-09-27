@@ -9,6 +9,7 @@ import { FeedersGateway } from '../feeders/feeders.gateway.js';
 import { StorageService } from '../storage/storage.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EventType } from '@prisma/client';
+import nodemailer from 'nodemailer';
 
 @Injectable()
 export class CameraService {
@@ -20,9 +21,22 @@ export class CameraService {
   private lastAutoSnapshotTime = new Map<string, number>();
   private readonly AUTO_SNAPSHOT_COOLDOWN_MS = 5000;
 
+  private transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
   constructor(
     @Inject(forwardRef(() => FeedersGateway))
-    private readonly feedersGateway: Pick<FeedersGateway, 'sendCommandToDevice'>,
+    private readonly feedersGateway: Pick<
+      FeedersGateway,
+      'sendCommandToDevice'
+    >,
     private readonly storageService: StorageService,
     private readonly prisma: PrismaService,
   ) {}
@@ -136,6 +150,14 @@ export class CameraService {
       this.logger.log(
         `✅ Авто-знімок успішно збережено в БД та R2: ${photoUrl}`,
       );
+
+      // if (this.isNightTime()) {
+      //   this.logger.log(
+      //     `🌙 Виявлено нічну активність (22:00 - 10:00). Надсилаємо email...`,
+      //   );
+      //   void this.sendNightPhotoEmail(cleanId, photoUrl);
+      // }
+
       return photoUrl;
     } catch (error) {
       this.logger.error(
@@ -143,6 +165,43 @@ export class CameraService {
         error,
       );
       return null;
+    }
+  }
+
+  private isNightTime(): boolean {
+    const kyivTimeString = new Date().toLocaleString('en-US', {
+      timeZone: 'Europe/Kyiv',
+      hour: 'numeric',
+      hour12: false,
+    });
+
+    const kyivHour = parseInt(kyivTimeString, 10);
+
+    return kyivHour >= 22 || kyivHour < 10;
+  }
+
+  private async sendNightPhotoEmail(deviceId: string, photoUrl: string) {
+    const recipientEmail = process.env.NOTIFY_EMAIL || 'your-email@gmail.com';
+
+    try {
+      await this.transporter.sendMail({
+        from: `"Feeder Watcher" <${process.env.SMTP_USER}>`,
+        to: recipientEmail,
+        subject: `🌙 Нічна фіксація кота [${deviceId}]`,
+        html: `
+          <h3>🐾 Кіт біля миски в нічний час!</h3>
+          <p>Пристрій: <b>${deviceId}</b></p>
+          <p>Час фіксації: <b>${new Date().toLocaleString('uk-UA')}</b></p>
+          <p>Переглянути фото: <a href="${photoUrl}" target="_blank">${photoUrl}</a></p>
+          <br />
+          <img src="${photoUrl}" alt="Cat Snapshot" style="max-width: 500px; border-radius: 8px;" />
+        `,
+      });
+      this.logger.log(
+        `📧 Нічний email успішно відправлено на ${recipientEmail}`,
+      );
+    } catch (err) {
+      this.logger.error(`❌ Помилка відправки email:`, err);
     }
   }
 }

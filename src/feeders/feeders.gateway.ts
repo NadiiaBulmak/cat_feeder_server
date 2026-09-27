@@ -187,18 +187,6 @@ export class FeedersGateway
                   data: { desiredState: FeederState.CLOSED },
                 });
 
-                setTimeout(() => {
-                  const sent = this.sendCommandToDevice(deviceId, 'CLOSED');
-                  if (sent) {
-                    this.logger.log(
-                      `🔒 Надіслано команду CLOSED для [${deviceId}] (Кіт відійшов)`,
-                    );
-                  } else {
-                    this.logger.warn(
-                      `⚠️ Не вдалося відправити CLOSED для [${deviceId}]: пристрій офлайн`,
-                    );
-                  }
-                }, 30000);
               }
             }
           } catch (e) {
