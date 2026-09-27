@@ -70,6 +70,7 @@ export class FeedersGateway
 
       const deviceId = rawDeviceId.trim();
       this.connectedDevices.set(deviceId, client);
+      this.logger.log(`🔌 Пристрій підключено до WS: [${deviceId}]`);
 
       const feeder = await this.prisma.feeder.findUnique({
         where: { deviceId },
@@ -96,20 +97,36 @@ export class FeedersGateway
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
 
-              await this.prisma.feeder.update({
-                where: { deviceId: deviceId },
-                data: { actualState: newState },
+              const updatedFeeder = await this.prisma.feeder.update({
+                where: { deviceId },
+                data: { 
+                  actualState: newState,
+                  ...(newState === FeederState.CLOSED && { desiredState: FeederState.CLOSED })
+                },
               });
 
               if (newState === FeederState.OPEN) {
-                this.logger.log(
-                  `🔓 Годівничка [${deviceId}] повністю відкрита.`,
-                );
-                this.startPhotoInterval(deviceId);
+                this.logger.log(`🔓 Годівничка [${deviceId}] повністю відкрита.`);
+                
+                await this.prisma.feedingEvent.create({
+                  data: {
+                    feederId: updatedFeeder.id,
+                    eventType: EventType.FEEDER_OPENED,
+                  },
+                });
               }
 
               if (newState === FeederState.CLOSED) {
                 this.stopPhotoInterval(deviceId);
+                this.logger.log(`🔒 Годівничка [${deviceId}] повністю закрита.`);
+
+                await this.prisma.feedingEvent.create({
+                  data: {
+                    feederId: updatedFeeder.id,
+                    eventType: EventType.FEEDER_CLOSED,
+                    metadata: { reason: 'AUTO_CLOSE_OR_COMMAND' },
+                  },
+                });
               }
 
               this.logger.log(
@@ -117,31 +134,7 @@ export class FeedersGateway
               );
             }
 
-            if (data.event === 'RFID_SCANNED' && data.tagValue) {
-              this.logger.log(`🏷️ RFID [${data.tagValue}] на [${deviceId}]`);
-
-              const feeder = await this.prisma.feeder.findUnique({
-                where: { deviceId },
-              });
-
-              if (feeder) {
-                await this.prisma.feeder.update({
-                  where: { id: feeder.id },
-                  data: { desiredState: FeederState.OPEN },
-                });
-
-                await this.prisma.feedingEvent.create({
-                  data: {
-                    feederId: feeder.id,
-                    eventType: EventType.FEEDER_OPENED,
-                    metadata: { rfidTag: data.tagValue },
-                  },
-                });
-
-                client.send(JSON.stringify({ command: 'OPEN' }));
-              }
-            }
-
+            // 2. КІТ ПІДІЙШОВ ДО МИСКИ
             if (data.event === 'CAT_APPROACHED') {
               this.logger.log(
                 `🐾 VL53L0X: Кіт поруч з мискою [${deviceId}] (Відстань: ${data.distance || 'N/A'} мм)`,
@@ -151,6 +144,7 @@ export class FeedersGateway
                 where: { deviceId },
               });
 
+              // Якщо кришка відкрита — починаємо серію фоток кожні 10с
               if (
                 feeder &&
                 (feeder.actualState === FeederState.OPEN ||
@@ -158,39 +152,22 @@ export class FeedersGateway
               ) {
                 this.startPhotoInterval(deviceId);
               } else {
+                // Якщо закрита — робимо один спалах/знімок кота біля закритої миски
                 void this.cameraService.triggerAutoSnapshot(deviceId);
               }
             }
 
+            // 3. КІТ ВІДІЙШОВ ВІД МИСКИ
             if (data.event === 'CAT_LEFT') {
               this.logger.log(
                 `📡 VL53L0X: Кіт відійшов від миски [${deviceId}]`,
               );
 
+              // Зупиняємо повторювані фотографії, бо кіт пішов
               this.stopPhotoInterval(deviceId);
-
-              const feeder = await this.prisma.feeder.findUnique({
-                where: { deviceId },
-              });
-
-              if (feeder) {
-                await this.prisma.feedingEvent.create({
-                  data: {
-                    feederId: feeder.id,
-                    eventType: EventType.FEEDER_CLOSED,
-                    metadata: { reason: 'CAT_LEFT' },
-                  },
-                });
-
-                await this.prisma.feeder.update({
-                  where: { id: feeder.id },
-                  data: { desiredState: FeederState.CLOSED },
-                });
-
-              }
             }
           } catch (e) {
-            this.logger.error(`[WS] Помилка JSON від [${deviceId}]:`, e);
+            this.logger.error(`[WS] Помилка обробки JSON від [${deviceId}]:`, e);
           }
         }
       });
@@ -204,6 +181,7 @@ export class FeedersGateway
       if (socket === client) {
         this.stopPhotoInterval(deviceId);
         this.connectedDevices.delete(deviceId);
+        this.logger.log(`🔌 Пристрій відключено від WS: [${deviceId}]`);
         break;
       }
     }
@@ -224,11 +202,6 @@ export class FeedersGateway
     const client = this.connectedDevices.get(targetDeviceId);
 
     this.logger.log(`📡 Запит команди [${command}] до: [${targetDeviceId}]`);
-    this.logger.log(
-      `📋 Доступні пристрої онлайн: ${
-        Array.from(this.connectedDevices.keys()).join(', ') || 'пусто'
-      }`,
-    );
 
     if (client && client.readyState === 1) {
       const payload = { command, catId };
@@ -241,7 +214,7 @@ export class FeedersGateway
     }
 
     this.logger.warn(
-      `⚠️ Пристрій [${targetDeviceId}] не знайдено або він офлайн. Перевірте, чи підключена плата.`,
+      `⚠️ Пристрій [${targetDeviceId}] не знайдено або він офлайн.`,
     );
     return false;
   }
