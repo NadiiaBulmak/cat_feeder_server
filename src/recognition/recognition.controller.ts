@@ -15,6 +15,7 @@ import { RecognitionService } from './recognition.service.js';
 import { FeedersGateway } from '../feeders/feeders.gateway.js';
 import { EventType, FeederState } from '../shared/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
 
 @Controller('cats')
 export class RecognitionController {
@@ -46,15 +47,12 @@ export class RecognitionController {
     @Param('id') catId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('Файл не знайдено');
+    if (!file) throw new BadRequestException(ERROR_MESSAGES.fileNotFound);
 
-    // 1. Отримуємо шлях до збереженого фото
     const filePath = file.path;
 
-    // 2. Перетворюємо фото на вектор (768 чисел)
     const vector = await this.embeddingService.generateVector(filePath);
 
-    // 3. Зберігаємо вектор у базу даних PostgreSQL
     await this.recognitionService.saveCatReference(catId, vector, filePath);
 
     return {
@@ -90,22 +88,20 @@ export class RecognitionController {
     @UploadedFile() file: Express.Multer.File,
     @Query('deviceId') deviceId: string,
   ) {
-    if (!file) throw new BadRequestException('Файл не знайдено');
+    if (!file) throw new BadRequestException(ERROR_MESSAGES.fileNotFound);
     if (!deviceId)
-      throw new BadRequestException('Не вказано deviceId у параметрах');
+      throw new BadRequestException(ERROR_MESSAGES.deviceIdRequired);
 
-    // 1. ШУКАЄМО ГОДІВНИЧКУ В БАЗІ ЗА deviceId
     const feeder = await this.prisma.feeder.findUnique({
       where: { deviceId },
     });
 
     if (!feeder) {
       throw new BadRequestException(
-        `Годівничку з deviceId [${deviceId}] не знайдено`,
+        ERROR_MESSAGES.feederByDeviceIdNotFound(deviceId),
       );
     }
 
-    // 2. Аналізуємо фото
     const vector = await this.embeddingService.generateVector(file.path);
     const match = await this.recognitionService.identifyCat(vector);
 
@@ -113,7 +109,6 @@ export class RecognitionController {
     const isRecognized = match.similarity >= THRESHOLD;
 
     if (isRecognized) {
-      // 3. ПЕРЕВІРЯЄМО ДОСТУП ЗА feeder.id (UUID)
       const hasAccess = await this.prisma.feederCat.findFirst({
         where: {
           feederId: feeder.id,
@@ -122,7 +117,6 @@ export class RecognitionController {
       });
 
       if (!hasAccess) {
-        // Записуємо спробу доступу чужого кота в історію
         await this.prisma.feedingEvent.create({
           data: {
             feederId: feeder.id,
@@ -135,29 +129,25 @@ export class RecognitionController {
 
         return {
           accessGranted: false,
-          message: `Привіт, ${match.catName}, але тобі не можна їсти з цієї годівнички! ⛔`,
+          message: ERROR_MESSAGES.catAccessDenied(match.catName),
           confidence: match.similarity,
         };
       }
 
-      // 4. ДОСТУП ДОЗВОЛЕНО: Оновлюємо бажаний стан (desiredState) у базі
-      // Це гарантує, що при втраті/відновленні Wi-Fi плата одразу відкриється знову
       await this.prisma.feeder.update({
         where: { id: feeder.id },
         data: { desiredState: FeederState.OPEN },
       });
 
-      // 5. Відправляємо команду по сокетах в реальному часі (по deviceId)
       const isSent = this.feedersGateway.sendCommandToDevice(
-        feeder.deviceId, // Для сокетів юзаємо ESP_001
+        feeder.deviceId,
         FeederState.OPEN,
         match.catId,
       );
 
-      // 6. ЗАПИСУЄМО УСПІШНУ ПОДІЮ В ІСТОРІЮ
       await this.prisma.feedingEvent.create({
         data: {
-          feederId: feeder.id, // UUID для зв'язку в базі
+          feederId: feeder.id,
           catId: match.catId,
           eventType: EventType.CAT_IDENTIFIED,
           confidence: match.similarity,
@@ -174,7 +164,6 @@ export class RecognitionController {
         catName: match.catName,
       };
     } else {
-      // Кота не розпізнано взагалі
       await this.prisma.feedingEvent.create({
         data: {
           feederId: feeder.id,
@@ -186,7 +175,7 @@ export class RecognitionController {
 
       return {
         accessGranted: false,
-        message: 'Невідомий кіт або поганий ракурс.',
+        message: ERROR_MESSAGES.catNotRecognized,
         confidence: match.similarity,
       };
     }

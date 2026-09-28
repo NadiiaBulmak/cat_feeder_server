@@ -4,11 +4,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { CreateFeederDto } from './dto/create-feeder.dto.js';
-import { UpdateFeederDto } from './dto/update-feeder.dto.js';
 import { FeederRepository } from './repository/feeders.repository.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederAction, FeederState } from '../shared/enums.js';
 import { FeedersGateway } from './feeders.gateway.js';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @Injectable()
 export class FeedersService {
@@ -50,15 +51,12 @@ export class FeedersService {
       where: { id },
     });
 
-    // console.log(feeder)
-
     if (!feeder) {
-      console.log('no feeder');
-      throw new NotFoundException('Feeder not found');
+      throw new NotFoundException(ERROR_MESSAGES.feederNotFound);
     }
 
     const newState = action === 'open' ? FeederState.OPEN : FeederState.CLOSED;
-    console.log(newState);
+    console.log(LOG_MESSAGES.feederStateChanged(newState));
 
     const commandSent = this.gateway.sendCommandToDevice(
       feeder.deviceId,
@@ -66,7 +64,7 @@ export class FeedersService {
     );
 
     if (!commandSent) {
-      throw new ServiceUnavailableException('Feeder device is offline');
+      throw new ServiceUnavailableException(ERROR_MESSAGES.feederDeviceOffline);
     }
 
     const updatedFeeder = await this.feederRepository.updateFeeder(

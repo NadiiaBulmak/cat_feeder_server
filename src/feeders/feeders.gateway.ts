@@ -12,6 +12,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
 import { EventType } from '@prisma/client';
 import { CameraService } from '../camera/camera.service.js';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -35,23 +37,19 @@ export class FeedersGateway
     if (this.photoIntervals.has(deviceId)) {
       clearInterval(this.photoIntervals.get(deviceId)!);
       this.photoIntervals.delete(deviceId);
-      this.logger.log(`⏹️ Зупинено циклічну фотофіксацію для [${deviceId}]`);
+      this.logger.log(LOG_MESSAGES.photoIntervalStopped(deviceId));
     }
   }
 
   private startPhotoInterval(deviceId: string) {
     if (this.photoIntervals.has(deviceId)) return;
 
-    this.logger.log(
-      `📸 Запущено циклічну фотофіксацію (кожні 10 сек) для [${deviceId}]`,
-    );
+    this.logger.log(LOG_MESSAGES.photoIntervalStarted(deviceId));
 
     void this.cameraService.triggerAutoSnapshot(deviceId);
 
     const interval = setInterval(() => {
-      this.logger.log(
-        `📸 10-секундний інтервал: Робимо повторний знімок кота [${deviceId}]`,
-      );
+      this.logger.log(LOG_MESSAGES.photoIntervalTick(deviceId));
       void this.cameraService.triggerAutoSnapshot(deviceId);
     }, 10000);
 
@@ -64,13 +62,13 @@ export class FeedersGateway
       const rawDeviceId = url.searchParams.get('deviceId');
 
       if (!rawDeviceId) {
-        client.close(1008, 'Device ID required');
+        client.close(1008, ERROR_MESSAGES.deviceIdRequired);
         return;
       }
 
       const deviceId = rawDeviceId.trim();
       this.connectedDevices.set(deviceId, client);
-      this.logger.log(`🔌 Пристрій підключено до WS: [${deviceId}]`);
+      this.logger.log(LOG_MESSAGES.deviceConnected(deviceId));
 
       const feeder = await this.prisma.feeder.findUnique({
         where: { deviceId },
@@ -103,7 +101,7 @@ export class FeedersGateway
               client.send(JSON.stringify({ command: commandToSend }));
               
               this.logger.log(
-                `🔄 [SYNC] Пристрій [${deviceId}] запросив стан. Відправлено: ${commandToSend}`,
+                LOG_MESSAGES.deviceSyncRequested(deviceId, commandToSend),
               );
             }
 
@@ -120,7 +118,7 @@ export class FeedersGateway
               });
 
               if (newState === FeederState.OPEN) {
-                this.logger.log(`🔓 Годівничка [${deviceId}] повністю відкрита.`);
+                this.logger.log(LOG_MESSAGES.feederOpened(deviceId));
                 
                 await this.prisma.feedingEvent.create({
                   data: {
@@ -132,7 +130,7 @@ export class FeedersGateway
 
               if (newState === FeederState.CLOSED) {
                 this.stopPhotoInterval(deviceId);
-                this.logger.log(`🔒 Годівничка [${deviceId}] повністю закрита.`);
+                this.logger.log(LOG_MESSAGES.feederClosed(deviceId));
 
                 await this.prisma.feedingEvent.create({
                   data: {
@@ -144,13 +142,13 @@ export class FeedersGateway
               }
 
               this.logger.log(
-                `🔄 Годівничка [${deviceId}] підтвердила статус: ${data.state}`,
+                LOG_MESSAGES.feederStateConfirmed(deviceId, data.state),
               );
             }
 
             if (data.event === 'CAT_APPROACHED') {
               this.logger.log(
-                `🐾 VL53L0X: Кіт поруч з мискою [${deviceId}] (Відстань: ${data.distance || 'N/A'} мм)`,
+                LOG_MESSAGES.catApproached(deviceId, data.distance ?? 'N/A'),
               );
 
               const feederData = await this.prisma.feeder.findUnique({
@@ -169,19 +167,20 @@ export class FeedersGateway
             }
 
             if (data.event === 'CAT_LEFT') {
-              this.logger.log(
-                `📡 VL53L0X: Кіт відійшов від миски [${deviceId}]`,
-              );
+              this.logger.log(LOG_MESSAGES.catLeft(deviceId));
 
               this.stopPhotoInterval(deviceId);
             }
           } catch (e) {
-            this.logger.error(`[WS] Помилка обробки JSON від [${deviceId}]:`, e);
+            this.logger.error(
+              LOG_MESSAGES.jsonMessageProcessingFailed(deviceId),
+              e,
+            );
           }
         }
       });
     } catch (error) {
-      this.logger.error('[WS] Помилка підключення:', error);
+      this.logger.error(LOG_MESSAGES.deviceConnectionFailed, error);
     }
   }
 
@@ -190,7 +189,7 @@ export class FeedersGateway
       if (socket === client) {
         this.stopPhotoInterval(deviceId);
         this.connectedDevices.delete(deviceId);
-        this.logger.log(`🔌 Пристрій відключено від WS: [${deviceId}]`);
+        this.logger.log(LOG_MESSAGES.deviceDisconnected(deviceId));
         break;
       }
     }
@@ -210,21 +209,19 @@ export class FeedersGateway
 
     const client = this.connectedDevices.get(targetDeviceId);
 
-    this.logger.log(`📡 Запит команди [${command}] до: [${targetDeviceId}]`);
+    this.logger.log(LOG_MESSAGES.commandRequested(command, targetDeviceId));
 
     if (client && client.readyState === 1) {
       const payload = { command, catId };
       client.send(JSON.stringify(payload));
 
       this.logger.log(
-        `✅ Відправлено ${JSON.stringify(payload)} на пристрій [${targetDeviceId}]`,
+        LOG_MESSAGES.commandSent(JSON.stringify(payload), targetDeviceId),
       );
       return true;
     }
 
-    this.logger.warn(
-      `⚠️ Пристрій [${targetDeviceId}] не знайдено або він офлайн.`,
-    );
+    this.logger.warn(LOG_MESSAGES.deviceUnavailable(targetDeviceId));
     return false;
   }
 }

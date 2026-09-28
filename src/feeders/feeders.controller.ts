@@ -8,21 +8,20 @@ import {
   Delete,
   UseGuards,
   Res,
-  NotFoundException,
   Logger,
   InternalServerErrorException,
   Req,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import axios from 'axios';
 import { FeedersService } from './feeders.service.js';
 import { CreateFeederDto } from './dto/create-feeder.dto.js';
-import { UpdateFeederDto } from './dto/update-feeder.dto.js';
 import { FeederAction } from '../shared/enums.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/strategy/jwt-auth.guard.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeedersGateway } from './feeders.gateway.js';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @Controller('feeders')
 export class FeedersController {
@@ -57,8 +56,7 @@ export class FeedersController {
 
   @Patch(':id/:action')
   update(@Param('id') id: string, @Param('action') action: FeederAction) {
-    // return this.feedersService.update(id, action);
-    console.log(id, action);
+    this.logger.log(LOG_MESSAGES.feederUpdateRequested(id, action));
     return this.feedersService.setFeederState(id, action);
   }
 
@@ -97,17 +95,17 @@ export class FeedersController {
 
     if (!isSent) {
       throw new InternalServerErrorException(
-        'Камера зараз не в мережі (Offline)',
+        ERROR_MESSAGES.cameraOffline,
       );
     }
 
-    this.logger.log(`Команду на знімок відправлено камері: ${cameraDeviceId}`);
+    this.logger.log(LOG_MESSAGES.snapshotCommandSent(cameraDeviceId));
 
     try {
       const imageBuffer = await new Promise<Buffer>((resolve, reject) => {
         const timeout = setTimeout(() => {
           this.pendingSnapshots.delete(deviceId);
-          reject(new Error('Камера не надіслала фото вчасно'));
+          reject(new Error(ERROR_MESSAGES.cameraSnapshotTimeout));
         }, 8000);
 
         this.pendingSnapshots.set(deviceId, (buffer) => {
@@ -123,8 +121,10 @@ export class FeedersController {
       });
       res.send(imageBuffer);
     } catch (error) {
-      this.logger.error(error);
-      throw new InternalServerErrorException(error);
+      this.logger.error(LOG_MESSAGES.snapshotRequestFailed, error);
+      throw new InternalServerErrorException(
+        ERROR_MESSAGES.snapshotRequestFailed,
+      );
     }
   }
 
@@ -141,7 +141,7 @@ export class FeedersController {
     req.on('end', () => {
       const imageBuffer = Buffer.concat(chunks);
       this.logger.log(
-        `Отримано фото від камери ${deviceId}. Розмір: ${imageBuffer.length} байт`,
+        LOG_MESSAGES.snapshotReceived(deviceId, imageBuffer.length),
       );
 
       const resolveWaitingRequest = this.pendingSnapshots.get(deviceId);

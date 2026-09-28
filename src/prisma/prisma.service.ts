@@ -5,6 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -17,9 +18,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   async onModuleInit() {
     try {
       await this.$connect();
-      this.logger.log('Успішно підключено до бази даних PostgreSQL');
+      this.logger.log(LOG_MESSAGES.databaseConnectionSucceeded);
     } catch (error) {
-      this.logger.error('Помилка підключення до бази даних', error);
+      this.logger.error(LOG_MESSAGES.databaseConnectionFailed, error);
     }
   }
 

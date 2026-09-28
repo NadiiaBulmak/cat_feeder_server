@@ -2,6 +2,7 @@ import { Controller, Post, Get, Body, UseGuards, Request, UnauthorizedException 
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './strategy/jwt-auth.guard.js';
 import type { Request as ExpressRequest } from 'express';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
 
 @Controller('auth')
 export class AuthController {
@@ -15,13 +16,16 @@ export class AuthController {
   @Post('login')
   async login(@Body() body: any) {
     const user = await this.authService.validateUser(body.email, body.password);
-    if (!user) throw new UnauthorizedException('Невірний email або пароль');
+    if (!user) throw new UnauthorizedException(ERROR_MESSAGES.invalidCredentials);
     return this.authService.login(user);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
   getProfile(@Request() req: ExpressRequest) {
+    // if (!req.user) {
+
+    // }
     return req.user;
   }
 }

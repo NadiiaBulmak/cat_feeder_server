@@ -10,6 +10,8 @@ import { StorageService } from '../storage/storage.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EventType } from '@prisma/client';
 import nodemailer from 'nodemailer';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @Injectable()
 export class CameraService {
@@ -47,7 +49,7 @@ export class CameraService {
 
   async getLiveSnapshotBuffer(deviceId: string): Promise<Buffer> {
     const targetId = this.getCameraId(deviceId);
-    this.logger.log(`📸 Запит фотографії для пристрою: [${targetId}]`);
+    this.logger.log(LOG_MESSAGES.cameraSnapshotRequested(targetId));
 
     const isSent = this.feedersGateway.sendCommandToDevice(
       deviceId,
@@ -56,14 +58,14 @@ export class CameraService {
 
     if (!isSent) {
       throw new InternalServerErrorException(
-        'Камера не в мережі (не підключена до сокетів)',
+        ERROR_MESSAGES.cameraOffline,
       );
     }
 
     return new Promise<Buffer>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingSnapshots.delete(targetId);
-        reject(new Error('Камера не надіслала фото вчасно'));
+        reject(new Error(ERROR_MESSAGES.cameraSnapshotTimeout));
       }, 15000);
 
       this.pendingSnapshots.set(targetId, (buffer) => {
@@ -80,11 +82,9 @@ export class CameraService {
     if (resolveWaitingRequest) {
       resolveWaitingRequest(imageBuffer);
       this.pendingSnapshots.delete(targetId);
-      this.logger.log(`✅ Фото від [${targetId}] успішно передано на фронтенд`);
+      this.logger.log(LOG_MESSAGES.cameraSnapshotDelivered(targetId));
     } else {
-      this.logger.warn(
-        `⚠️ Отримано фото від [${targetId}], але його ніхто не чекав (Можливо, фронтенд відключився по таймауту?)`,
-      );
+      this.logger.warn(LOG_MESSAGES.cameraSnapshotUnclaimed(targetId));
     }
   }
 
@@ -92,9 +92,7 @@ export class CameraService {
     deviceId: string,
     folder: string = 'reference',
   ): Promise<string> {
-    this.logger.log(
-      `☁️ Початок процесу збереження фото в хмару для [${deviceId}]`,
-    );
+    this.logger.log(LOG_MESSAGES.cloudPhotoSaveStarted(deviceId));
 
     const imageBuffer = await this.getLiveSnapshotBuffer(deviceId);
 
@@ -116,7 +114,7 @@ export class CameraService {
         (this.AUTO_SNAPSHOT_COOLDOWN_MS - (now - lastTime)) / 1000,
       );
       this.logger.warn(
-        `⏳ [${cleanId}] Пропущено авто-знімок: зачекайте ще ${remaining} сек.`,
+        LOG_MESSAGES.autoSnapshotSkippedCooldown(cleanId, remaining),
       );
       return null;
     }
@@ -124,7 +122,7 @@ export class CameraService {
     this.lastAutoSnapshotTime.set(cleanId, now);
 
     try {
-      this.logger.log(`📸 Автоматичний знімок для пристрою [${cleanId}]...`);
+      this.logger.log(LOG_MESSAGES.automaticSnapshotStarted(cleanId));
 
       const imageBuffer = await this.getLiveSnapshotBuffer(cleanId);
       const folderName = `auto-snapshots/${cleanId}`;
@@ -147,23 +145,16 @@ export class CameraService {
         });
       }
 
-      this.logger.log(
-        `✅ Авто-знімок успішно збережено в БД та R2: ${photoUrl}`,
-      );
+      this.logger.log(LOG_MESSAGES.automaticSnapshotSaved(photoUrl));
 
       // if (this.isNightTime()) {
-      //   this.logger.log(
-      //     `🌙 Виявлено нічну активність (22:00 - 10:00). Надсилаємо email...`,
-      //   );
+      //   this.logger.log(LOG_MESSAGES.nightActivityDetected);
       //   void this.sendNightPhotoEmail(cleanId, photoUrl);
       // }
 
       return photoUrl;
     } catch (error) {
-      this.logger.error(
-        `❌ Помилка створення авто-знімка для [${cleanId}]:`,
-        error,
-      );
+      this.logger.error(LOG_MESSAGES.automaticSnapshotFailed(cleanId), error);
       return null;
     }
   }
@@ -197,11 +188,9 @@ export class CameraService {
           <img src="${photoUrl}" alt="Cat Snapshot" style="max-width: 500px; border-radius: 8px;" />
         `,
       });
-      this.logger.log(
-        `📧 Нічний email успішно відправлено на ${recipientEmail}`,
-      );
+      this.logger.log(LOG_MESSAGES.nightEmailSent(recipientEmail));
     } catch (err) {
-      this.logger.error(`❌ Помилка відправки email:`, err);
+      this.logger.error(LOG_MESSAGES.emailSendFailed, err);
     }
   }
 }

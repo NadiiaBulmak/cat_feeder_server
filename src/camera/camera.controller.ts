@@ -16,6 +16,8 @@ import { CameraService } from './camera.service.js';
 import { JwtAuthGuard } from '../auth/strategy/jwt-auth.guard.js';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { StorageService } from '../storage/storage.service.js';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @Controller('camera')
 export class CameraController {
@@ -28,7 +30,6 @@ export class CameraController {
   @Get(':deviceId/snapshot')
   async getSnapshot(@Param('deviceId') deviceId: string, @Res() res: Response) {
     try {
-      // Код зупиниться тут і чекатиме, поки камера не зробить POST-запит
       const buffer = await this.cameraService.getLiveSnapshotBuffer(deviceId);
 
       res.setHeader('Content-Type', 'image/jpeg');
@@ -37,10 +38,10 @@ export class CameraController {
         'no-store, no-cache, must-revalidate, private',
       );
       res.send(buffer);
-    } catch (error) {
+    } catch {
       res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
         success: false,
-        message: error || 'Помилка отримання знімка',
+        message: ERROR_MESSAGES.snapshotRequestFailed,
       });
     }
   }
@@ -53,7 +54,9 @@ export class CameraController {
     @Res() res: Response,
   ) {
     if (!deviceId) {
-      return res.status(HttpStatus.BAD_REQUEST).send('Missing deviceId');
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(ERROR_MESSAGES.deviceIdRequired);
     }
 
     try {
@@ -67,10 +70,10 @@ export class CameraController {
 
       res.status(HttpStatus.OK).send('Photo received');
     } catch (error) {
-      console.error('Помилка прийому фото:', error);
+      console.error(LOG_MESSAGES.cameraPhotoReceiveFailed, error);
       res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .send('Error processing photo');
+        .send(ERROR_MESSAGES.cameraPhotoProcessingFailed);
     }
   }
 
@@ -90,11 +93,10 @@ export class CameraController {
         message: 'Фото успішно збережено в хмару',
         url: fileUrl,
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
-        message:
-          error instanceof Error ? error.message : 'Помилка збереження фото',
+        message: ERROR_MESSAGES.captureAndSaveFailed,
       };
     }
   }
@@ -106,7 +108,7 @@ export class CameraController {
     @Query('folder') folder: string = 'snapshots',
   ) {
     if (!file) {
-      return { success: false, message: 'Файл не передано' };
+      return { success: false, message: ERROR_MESSAGES.fileNotProvided };
     }
 
     try {
@@ -116,10 +118,10 @@ export class CameraController {
         message: 'Знімок успішно збережено в хмару',
         url,
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Помилка збереження знімка'
+        message: ERROR_MESSAGES.snapshotSaveFailed,
       };
     }
   }

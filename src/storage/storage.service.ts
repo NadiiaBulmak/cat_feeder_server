@@ -1,5 +1,7 @@
 import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { ERROR_MESSAGES } from '../shared/error-messages.js';
+import { LOG_MESSAGES } from '../shared/log-messages.js';
 
 @Injectable()
 export class StorageService {
@@ -35,12 +37,12 @@ export class StorageService {
       );
       
       const fileUrl = `${this.publicUrl}/${fileName}`;
-      this.logger.log(`☁️ Фото успішно збережено в R2: ${fileUrl}`);
+      this.logger.log(LOG_MESSAGES.cloudPhotoSaved(fileUrl));
       
       return fileUrl;
     } catch (error) {
-      this.logger.error('❌ Помилка завантаження фото в Cloudflare R2', error);
-      throw new InternalServerErrorException('Не вдалося зберегти фото в хмару');
+      this.logger.error(LOG_MESSAGES.cloudPhotoUploadFailed, error);
+      throw new InternalServerErrorException(ERROR_MESSAGES.cloudPhotoUploadFailed);
     }
   }
 
@@ -63,8 +65,8 @@ export class StorageService {
         .sort((a, b) => (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0))
         .map((file) => `${this.publicUrl}/${file.Key}`);
     } catch (error) {
-      this.logger.error(`❌ Помилка отримання списку фото для [${deviceId}]`, error);
-      throw new InternalServerErrorException('Не вдалося отримати список фото з хмари');
+      this.logger.error(LOG_MESSAGES.cloudPhotoListFailed(deviceId), error);
+      throw new InternalServerErrorException(ERROR_MESSAGES.cloudPhotoListFailed);
     }
   }
 }

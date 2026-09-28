@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Feeder, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { FeederState } from '../../shared/enums.js';
+import { ERROR_MESSAGES } from '../../shared/error-messages.js';
 
 @Injectable()
 export class FeederRepository {
@@ -13,7 +14,7 @@ export class FeederRepository {
 
     updateFeeder(id: string, actualState: FeederState): Promise<Feeder> {
         if (!actualState) {
-            throw new BadRequestException('Update data cannot be empty');
+            throw new BadRequestException(ERROR_MESSAGES.feederUpdateDataEmpty);
         }
 
         return this.prisma.feeder.update({
