@@ -93,6 +93,20 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
+            if (data.event === 'REQUEST_SYNC') {
+              const currentFeeder = await this.prisma.feeder.findUnique({
+                where: { deviceId },
+                select: { desiredState: true },
+              });
+              
+              const commandToSend = currentFeeder?.desiredState || FeederState.CLOSED;
+              client.send(JSON.stringify({ command: commandToSend }));
+              
+              this.logger.log(
+                `🔄 [SYNC] Пристрій [${deviceId}] запросив стан. Відправлено: ${commandToSend}`,
+              );
+            }
+
             if (data.event === 'STATE_CHANGED' && data.state) {
               const newState =
                 data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
@@ -134,36 +148,31 @@ export class FeedersGateway
               );
             }
 
-            // 2. КІТ ПІДІЙШОВ ДО МИСКИ
             if (data.event === 'CAT_APPROACHED') {
               this.logger.log(
                 `🐾 VL53L0X: Кіт поруч з мискою [${deviceId}] (Відстань: ${data.distance || 'N/A'} мм)`,
               );
 
-              const feeder = await this.prisma.feeder.findUnique({
+              const feederData = await this.prisma.feeder.findUnique({
                 where: { deviceId },
               });
 
-              // Якщо кришка відкрита — починаємо серію фоток кожні 10с
               if (
-                feeder &&
-                (feeder.actualState === FeederState.OPEN ||
-                  feeder.desiredState === FeederState.OPEN)
+                feederData &&
+                (feederData.actualState === FeederState.OPEN ||
+                  feederData.desiredState === FeederState.OPEN)
               ) {
                 this.startPhotoInterval(deviceId);
               } else {
-                // Якщо закрита — робимо один спалах/знімок кота біля закритої миски
                 void this.cameraService.triggerAutoSnapshot(deviceId);
               }
             }
 
-            // 3. КІТ ВІДІЙШОВ ВІД МИСКИ
             if (data.event === 'CAT_LEFT') {
               this.logger.log(
                 `📡 VL53L0X: Кіт відійшов від миски [${deviceId}]`,
               );
 
-              // Зупиняємо повторювані фотографії, бо кіт пішов
               this.stopPhotoInterval(deviceId);
             }
           } catch (e) {
