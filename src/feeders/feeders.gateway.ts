@@ -23,7 +23,7 @@ export class FeedersGateway
   server: Server;
 
   private connectedDevices = new Map<string, WebSocket>();
-  private photoIntervals = new Map<string, NodeJS.Timeout>();
+  private pendingDistanceRequests = new Map<string, (distance: number) => void>();
 
   private readonly logger = new Logger(FeedersGateway.name);
 
@@ -32,29 +32,6 @@ export class FeedersGateway
     @Inject(forwardRef(() => CameraService))
     private cameraService: Pick<CameraService, 'triggerAutoSnapshot'>,
   ) {}
-
-  private stopPhotoInterval(deviceId: string) {
-    if (this.photoIntervals.has(deviceId)) {
-      clearInterval(this.photoIntervals.get(deviceId)!);
-      this.photoIntervals.delete(deviceId);
-      this.logger.log(LOG_MESSAGES.photoIntervalStopped(deviceId));
-    }
-  }
-
-  private startPhotoInterval(deviceId: string) {
-    if (this.photoIntervals.has(deviceId)) return;
-
-    this.logger.log(LOG_MESSAGES.photoIntervalStarted(deviceId));
-
-    void this.cameraService.triggerAutoSnapshot(deviceId);
-
-    const interval = setInterval(() => {
-      this.logger.log(LOG_MESSAGES.photoIntervalTick(deviceId));
-      void this.cameraService.triggerAutoSnapshot(deviceId);
-    }, 10000);
-
-    this.photoIntervals.set(deviceId, interval);
-  }
 
   async handleConnection(client: WebSocket, request: IncomingMessage) {
     try {
@@ -90,6 +67,16 @@ export class FeedersGateway
         if (msg.startsWith('{')) {
           try {
             const data = JSON.parse(msg);
+
+            if (data.event === 'DISTANCE_REPORT' && data.distance !== undefined) {
+              this.logger.log(`📏 [WS] Distace of [${deviceId}]: ${data.distance} mm`);
+              
+              const resolveWaitingRequest = this.pendingDistanceRequests.get(deviceId);
+              if (resolveWaitingRequest) {
+                resolveWaitingRequest(data.distance);
+                this.pendingDistanceRequests.delete(deviceId);
+              }
+            }
 
             if (data.event === 'REQUEST_SYNC') {
               const currentFeeder = await this.prisma.feeder.findUnique({
@@ -129,7 +116,6 @@ export class FeedersGateway
               }
 
               if (newState === FeederState.CLOSED) {
-                // this.stopPhotoInterval(deviceId);
                 this.logger.log(LOG_MESSAGES.feederClosed(deviceId));
 
                 await this.prisma.feedingEvent.create({
@@ -161,17 +147,10 @@ export class FeedersGateway
                   feederData.desiredState === FeederState.OPEN)
               ) {
                 void this.cameraService.triggerAutoSnapshot(deviceId);
-                // this.startPhotoInterval(deviceId);
               } else {
                 void this.cameraService.triggerAutoSnapshot(deviceId);
               }
             }
-
-            // if (data.event === 'CAT_LEFT') {
-            //   this.logger.log(LOG_MESSAGES.catLeft(deviceId));
-
-            //   this.stopPhotoInterval(deviceId);
-            // }
           } catch (e) {
             this.logger.error(
               LOG_MESSAGES.jsonMessageProcessingFailed(deviceId),
@@ -188,7 +167,6 @@ export class FeedersGateway
   handleDisconnect(client: WebSocket) {
     for (const [deviceId, socket] of this.connectedDevices.entries()) {
       if (socket === client) {
-        // this.stopPhotoInterval(deviceId);
         this.connectedDevices.delete(deviceId);
         this.logger.log(LOG_MESSAGES.deviceDisconnected(deviceId));
         break;
@@ -198,7 +176,7 @@ export class FeedersGateway
 
   sendCommandToDevice(
     deviceId: string,
-    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT',
+    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT' | 'GET_DISTANCE',
     catId?: string,
   ): boolean {
     const cleanDeviceId = deviceId.trim();
@@ -224,5 +202,25 @@ export class FeedersGateway
 
     this.logger.warn(LOG_MESSAGES.deviceUnavailable(targetDeviceId));
     return false;
+  }
+
+  async requestDistance(deviceId: string): Promise<number> {
+    const isSent = this.sendCommandToDevice(deviceId, 'GET_DISTANCE');
+    
+    if (!isSent) {
+      throw new Error(`Device [${deviceId}] is offline`);
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingDistanceRequests.delete(deviceId);
+        reject(new Error('Timeout'));
+      }, 5000);
+
+      this.pendingDistanceRequests.set(deviceId, (distance: number) => {
+        clearTimeout(timeout);
+        resolve(distance);
+      });
+    });
   }
 }

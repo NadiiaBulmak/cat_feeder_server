@@ -94,9 +94,7 @@ export class FeedersController {
     );
 
     if (!isSent) {
-      throw new InternalServerErrorException(
-        ERROR_MESSAGES.cameraOffline,
-      );
+      throw new InternalServerErrorException(ERROR_MESSAGES.cameraOffline);
     }
 
     this.logger.log(LOG_MESSAGES.snapshotCommandSent(cameraDeviceId));
@@ -125,6 +123,18 @@ export class FeedersController {
       throw new InternalServerErrorException(
         ERROR_MESSAGES.snapshotRequestFailed,
       );
+    }
+  }
+
+  @Get(':deviceId/distance')
+  async getFeederDistance(@Param('deviceId') deviceId: string) {
+    try {
+      const distance = await this.feedersGateway.requestDistance(deviceId);
+      return { success: true, distance };
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
     }
   }
 
