@@ -27,6 +27,7 @@ export class RecognitionController {
   ) {}
 
   // POST /cats/:id/reference
+  // TODO: use storage service
   @Post(':id/reference')
   @UseInterceptors(
     FileInterceptor('photo', {
@@ -61,7 +62,7 @@ export class RecognitionController {
       imageUrl: filePath,
     };
   }
-
+// TODO: use storage to save attepts
   @Post('identify')
   @UseInterceptors(
     FileInterceptor('photo', {

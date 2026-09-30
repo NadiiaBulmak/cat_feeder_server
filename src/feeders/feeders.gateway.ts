@@ -129,7 +129,7 @@ export class FeedersGateway
               }
 
               if (newState === FeederState.CLOSED) {
-                this.stopPhotoInterval(deviceId);
+                // this.stopPhotoInterval(deviceId);
                 this.logger.log(LOG_MESSAGES.feederClosed(deviceId));
 
                 await this.prisma.feedingEvent.create({
@@ -160,17 +160,18 @@ export class FeedersGateway
                 (feederData.actualState === FeederState.OPEN ||
                   feederData.desiredState === FeederState.OPEN)
               ) {
-                this.startPhotoInterval(deviceId);
+                void this.cameraService.triggerAutoSnapshot(deviceId);
+                // this.startPhotoInterval(deviceId);
               } else {
                 void this.cameraService.triggerAutoSnapshot(deviceId);
               }
             }
 
-            if (data.event === 'CAT_LEFT') {
-              this.logger.log(LOG_MESSAGES.catLeft(deviceId));
+            // if (data.event === 'CAT_LEFT') {
+            //   this.logger.log(LOG_MESSAGES.catLeft(deviceId));
 
-              this.stopPhotoInterval(deviceId);
-            }
+            //   this.stopPhotoInterval(deviceId);
+            // }
           } catch (e) {
             this.logger.error(
               LOG_MESSAGES.jsonMessageProcessingFailed(deviceId),
@@ -187,7 +188,7 @@ export class FeedersGateway
   handleDisconnect(client: WebSocket) {
     for (const [deviceId, socket] of this.connectedDevices.entries()) {
       if (socket === client) {
-        this.stopPhotoInterval(deviceId);
+        // this.stopPhotoInterval(deviceId);
         this.connectedDevices.delete(deviceId);
         this.logger.log(LOG_MESSAGES.deviceDisconnected(deviceId));
         break;
