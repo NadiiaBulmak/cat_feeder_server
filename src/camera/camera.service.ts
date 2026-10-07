@@ -51,16 +51,16 @@ export class CameraService {
     const targetId = this.getCameraId(deviceId);
     this.logger.log(LOG_MESSAGES.cameraSnapshotRequested(targetId));
 
-    const isSent = this.feedersGateway.sendCommandToDevice(
-      deviceId,
-      'TAKE_SNAPSHOT',
-    );
+    // const isSent = this.feedersGateway.sendCommandToDevice(
+    //   deviceId,
+    //   'TAKE_SNAPSHOT',
+    // );
 
-    if (!isSent) {
-      throw new InternalServerErrorException(
-        ERROR_MESSAGES.cameraOffline,
-      );
-    }
+    // if (!isSent) {
+    //   throw new InternalServerErrorException(
+    //     ERROR_MESSAGES.cameraOffline,
+    //   );
+    // }
 
     return new Promise<Buffer>((resolve, reject) => {
       const timeout = setTimeout(() => {

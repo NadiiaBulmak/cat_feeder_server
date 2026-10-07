@@ -7,11 +7,10 @@ import {
 import { WebSocket } from 'ws';
 import type { Server } from 'ws';
 import type { IncomingMessage } from 'http';
-import { forwardRef, Inject, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
 import { EventType } from '@prisma/client';
-import { CameraService } from '../camera/camera.service.js';
 import { ERROR_MESSAGES } from '../shared/error-messages.js';
 import { LOG_MESSAGES } from '../shared/log-messages.js';
 
@@ -24,14 +23,10 @@ export class FeedersGateway
 
   private connectedDevices = new Map<string, WebSocket>();
   private pendingDistanceRequests = new Map<string, (distance: number) => void>();
-
+  private lastBleDetections = new Map<string, number>();
   private readonly logger = new Logger(FeedersGateway.name);
 
-  constructor(
-    private prisma: PrismaService,
-    @Inject(forwardRef(() => CameraService))
-    private cameraService: Pick<CameraService, 'triggerAutoSnapshot'>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async handleConnection(client: WebSocket, request: IncomingMessage) {
     try {
@@ -68,9 +63,12 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
+            if (data.event === 'BLE_DETECTED' && data.mac) {
+              this.lastBleDetections.set(data.mac, Date.now());
+              this.logger.log(`📡 [BLE] Знайдено мітку ${data.mac} | RSSI: ${data.rssi} dBm`);
+            }
+
             if (data.event === 'DISTANCE_REPORT' && data.distance !== undefined) {
-              this.logger.log(`📏 [WS] Distace of [${deviceId}]: ${data.distance} mm`);
-              
               const resolveWaitingRequest = this.pendingDistanceRequests.get(deviceId);
               if (resolveWaitingRequest) {
                 resolveWaitingRequest(data.distance);
@@ -83,41 +81,31 @@ export class FeedersGateway
                 where: { deviceId },
                 select: { desiredState: true },
               });
-              
+
               const commandToSend = currentFeeder?.desiredState || FeederState.CLOSED;
               client.send(JSON.stringify({ command: commandToSend }));
-              
-              this.logger.log(
-                LOG_MESSAGES.deviceSyncRequested(deviceId, commandToSend),
-              );
             }
 
             if (data.event === 'STATE_CHANGED' && data.state) {
-              const newState =
-                data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
+              const newState = data.state === 'OPEN' ? FeederState.OPEN : FeederState.CLOSED;
 
               const updatedFeeder = await this.prisma.feeder.update({
                 where: { deviceId },
-                data: { 
+                data: {
                   actualState: newState,
-                  ...(newState === FeederState.CLOSED && { desiredState: FeederState.CLOSED })
+                  ...(newState === FeederState.CLOSED && { desiredState: FeederState.CLOSED }),
                 },
               });
 
               if (newState === FeederState.OPEN) {
                 this.logger.log(LOG_MESSAGES.feederOpened(deviceId));
-                
                 await this.prisma.feedingEvent.create({
-                  data: {
-                    feederId: updatedFeeder.id,
-                    eventType: EventType.FEEDER_OPENED,
-                  },
+                  data: { feederId: updatedFeeder.id, eventType: EventType.FEEDER_OPENED },
                 });
               }
 
               if (newState === FeederState.CLOSED) {
                 this.logger.log(LOG_MESSAGES.feederClosed(deviceId));
-
                 await this.prisma.feedingEvent.create({
                   data: {
                     feederId: updatedFeeder.id,
@@ -126,36 +114,28 @@ export class FeedersGateway
                   },
                 });
               }
-
-              this.logger.log(
-                LOG_MESSAGES.feederStateConfirmed(deviceId, data.state),
-              );
             }
 
             if (data.event === 'CAT_APPROACHED') {
-              this.logger.log(
-                LOG_MESSAGES.catApproached(deviceId, data.distance ?? 'N/A'),
-              );
+              this.logger.log(LOG_MESSAGES.catApproached(deviceId, data.distance ?? 'N/A'));
 
-              const feederData = await this.prisma.feeder.findUnique({
-                where: { deviceId },
-              });
+              const targetMac = 'ff:ff:55:04:dc:bd';
+              const lastSeen = this.lastBleDetections.get(targetMac) || 0;
+              const isTagNearby = Date.now() - lastSeen <= 15000;
 
-              if (
-                feederData &&
-                (feederData.actualState === FeederState.OPEN ||
-                  feederData.desiredState === FeederState.OPEN)
-              ) {
-                void this.cameraService.triggerAutoSnapshot(deviceId);
+              if (isTagNearby) {
+                this.logger.log(`🟢 [ДОСТУП ДОЗВОЛЕНО] Мітка поруч. Відправляємо команду OPEN!`);
+                this.sendCommandToDevice(deviceId, 'OPEN');
               } else {
-                void this.cameraService.triggerAutoSnapshot(deviceId);
+                this.logger.log(`🔴 [ДОСТУП ЗАБОРОНЕНО] Хтось підійшов, але мітки немає поблизу.`);
               }
             }
+
+            if (data.event === 'CAT_LEFT') {
+              this.logger.log(`🐈 [КІТ ПІШОВ] Відстань: ${data.distance} мм. Залізо відраховує 30 сек до закриття...`);
+            }
           } catch (e) {
-            this.logger.error(
-              LOG_MESSAGES.jsonMessageProcessingFailed(deviceId),
-              e,
-            );
+            this.logger.error(LOG_MESSAGES.jsonMessageProcessingFailed(deviceId), e);
           }
         }
       });
@@ -174,53 +154,15 @@ export class FeedersGateway
     }
   }
 
-  sendCommandToDevice(
-    deviceId: string,
-    command: 'OPEN' | 'CLOSED' | 'TAKE_SNAPSHOT' | 'GET_DISTANCE',
-    catId?: string,
-  ): boolean {
+  sendCommandToDevice(deviceId: string, command: 'OPEN' | 'CLOSED' | 'GET_DISTANCE', catId?: string): boolean {
     const cleanDeviceId = deviceId.trim();
-
-    const targetDeviceId =
-      command === 'TAKE_SNAPSHOT' && !cleanDeviceId.endsWith('-camera')
-        ? `${cleanDeviceId}-camera`
-        : cleanDeviceId;
-
-    const client = this.connectedDevices.get(targetDeviceId);
-
-    this.logger.log(LOG_MESSAGES.commandRequested(command, targetDeviceId));
+    const client = this.connectedDevices.get(cleanDeviceId);
 
     if (client && client.readyState === 1) {
       const payload = { command, catId };
       client.send(JSON.stringify(payload));
-
-      this.logger.log(
-        LOG_MESSAGES.commandSent(JSON.stringify(payload), targetDeviceId),
-      );
       return true;
     }
-
-    this.logger.warn(LOG_MESSAGES.deviceUnavailable(targetDeviceId));
     return false;
-  }
-
-  async requestDistance(deviceId: string): Promise<number> {
-    const isSent = this.sendCommandToDevice(deviceId, 'GET_DISTANCE');
-    
-    if (!isSent) {
-      throw new Error(`Device [${deviceId}] is offline`);
-    }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingDistanceRequests.delete(deviceId);
-        reject(new Error('Timeout'));
-      }, 5000);
-
-      this.pendingDistanceRequests.set(deviceId, (distance: number) => {
-        clearTimeout(timeout);
-        resolve(distance);
-      });
-    });
   }
 }

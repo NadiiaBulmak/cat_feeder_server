@@ -81,62 +81,62 @@ export class FeedersController {
     return this.feedersService.updateData(userId, catId, feederId);
   }
 
-  @Get(':deviceId/snapshot')
-  async getLiveSnapshot(
-    @Param('deviceId') deviceId: string,
-    @Res() res: Response,
-  ) {
-    const cameraDeviceId = `${deviceId}`;
+  // @Get(':deviceId/snapshot')
+  // async getLiveSnapshot(
+  //   @Param('deviceId') deviceId: string,
+  //   @Res() res: Response,
+  // ) {
+  //   const cameraDeviceId = `${deviceId}`;
 
-    const isSent = this.feedersGateway.sendCommandToDevice(
-      cameraDeviceId,
-      'TAKE_SNAPSHOT',
-    );
+  //   const isSent = this.feedersGateway.sendCommandToDevice(
+  //     cameraDeviceId,
+  //     'TAKE_SNAPSHOT',
+  //   );
 
-    if (!isSent) {
-      throw new InternalServerErrorException(ERROR_MESSAGES.cameraOffline);
-    }
+  //   if (!isSent) {
+  //     throw new InternalServerErrorException(ERROR_MESSAGES.cameraOffline);
+  //   }
 
-    this.logger.log(LOG_MESSAGES.snapshotCommandSent(cameraDeviceId));
+  //   this.logger.log(LOG_MESSAGES.snapshotCommandSent(cameraDeviceId));
 
-    try {
-      const imageBuffer = await new Promise<Buffer>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          this.pendingSnapshots.delete(deviceId);
-          reject(new Error(ERROR_MESSAGES.cameraSnapshotTimeout));
-        }, 8000);
+  //   try {
+  //     const imageBuffer = await new Promise<Buffer>((resolve, reject) => {
+  //       const timeout = setTimeout(() => {
+  //         this.pendingSnapshots.delete(deviceId);
+  //         reject(new Error(ERROR_MESSAGES.cameraSnapshotTimeout));
+  //       }, 8000);
 
-        this.pendingSnapshots.set(deviceId, (buffer) => {
-          clearTimeout(timeout);
-          resolve(buffer);
-        });
-      });
+  //       this.pendingSnapshots.set(deviceId, (buffer) => {
+  //         clearTimeout(timeout);
+  //         resolve(buffer);
+  //       });
+  //     });
 
-      res.set({
-        'Content-Type': 'image/jpeg',
-        'Content-Length': imageBuffer.length,
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-      });
-      res.send(imageBuffer);
-    } catch (error) {
-      this.logger.error(LOG_MESSAGES.snapshotRequestFailed, error);
-      throw new InternalServerErrorException(
-        ERROR_MESSAGES.snapshotRequestFailed,
-      );
-    }
-  }
+  //     res.set({
+  //       'Content-Type': 'image/jpeg',
+  //       'Content-Length': imageBuffer.length,
+  //       'Cache-Control': 'no-cache, no-store, must-revalidate',
+  //     });
+  //     res.send(imageBuffer);
+  //   } catch (error) {
+  //     this.logger.error(LOG_MESSAGES.snapshotRequestFailed, error);
+  //     throw new InternalServerErrorException(
+  //       ERROR_MESSAGES.snapshotRequestFailed,
+  //     );
+  //   }
+  // }
 
-  @Get(':deviceId/distance')
-  async getFeederDistance(@Param('deviceId') deviceId: string) {
-    try {
-      const distance = await this.feedersGateway.requestDistance(deviceId);
-      return { success: true, distance };
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new InternalServerErrorException(message);
-    }
-  }
+  // @Get(':deviceId/distance')
+  // async getFeederDistance(@Param('deviceId') deviceId: string) {
+  //   try {
+  //     // const distance = await this.feedersGateway.requestDistance(deviceId);
+  //     return { success: true, distance };
+  //   } catch (error: unknown) {
+  //     const message =
+  //       error instanceof Error ? error.message : 'Unknown error';
+  //     throw new InternalServerErrorException(message);
+  //   }
+  // }
 
   @Post(':deviceId/upload-snapshot')
   async uploadSnapshot(

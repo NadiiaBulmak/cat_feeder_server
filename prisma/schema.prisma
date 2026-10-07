@@ -1,12 +1,10 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [vector]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum FeederState {
@@ -15,12 +13,10 @@ enum FeederState {
 }
 
 enum EventType {
-  CAT_DETECTED
-  CAT_IDENTIFIED
+  CAT_APPROACHED
+  CAT_LEFT
   FEEDER_OPENED
   FEEDER_CLOSED
-  UNKNOWN_CAT
-  IDENTIFICATION_FAILED
   HARDWARE_ERROR
   APP_COMMAND
 }
@@ -45,14 +41,14 @@ model User {
 }
 
 model ResetToken {
-  id        String    @id @default(cuid())
-  userId    String    @unique
-  tokenHash String    @unique
-  createdAt DateTime  @default(now())
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
   expiresAt DateTime
   usedAt    DateTime?
   
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Feeder {
@@ -67,64 +63,33 @@ model Feeder {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   
-  cameras      Camera[]
-
   userFeeders  UserFeeder[]
   feederCats   FeederCat[]
 
   events       FeedingEvent[]
 }
 
-model Camera {
-  id        String   @id @default(uuid())
-  name      String
-  ipAddress String   @unique
+model Cat {
+  id         String   @id @default(uuid())
+  name       String
   
-  feederId  String?  
-  feeder    Feeder?  @relation(fields: [feederId], references: [id], onDelete: SetNull)
+  bleMac     String?  @unique 
+  
+  photos     Photo[]
+  events     FeedingEvent[]
 
-  photos    Photo[]  
-  createdAt DateTime @default(now())
+  userCats   UserCat[]
+  feederCats FeederCat[]
 }
 
 model Photo {
   id        String   @id @default(uuid())
   filename  String
   
-  cameraId  String
-  camera    Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
-  
-  createdAt DateTime @default(now())
-}
-
-model Cat {
-  id        String   @id @default(uuid())
-  name      String
-  
-  tags        RfidTag[]   
-  embeddings  CatEmbedding[] // AI вектори
-  events      FeedingEvent[]
-
-  userCats    UserCat[]
-  feederCats  FeederCat[]
-}
-
-model RfidTag {
-  id       String @id @default(uuid())
-  tagValue String @unique 
-  catId    String
-  cat      Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
-}
-
-model CatEmbedding {
-  id        String   @id @default(uuid())
   catId     String
-  
-  embedding Unsupported("vector(1000)")? 
-  imageUrl  String? 
+  cat       Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
   
   createdAt DateTime @default(now())
-  cat       Cat      @relation(fields: [catId], references: [id], onDelete: Cascade)
 }
 
 model FeedingEvent {
@@ -140,8 +105,7 @@ model FeedingEvent {
   user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   eventType  EventType
-  confidence Float?    // Впевненість AI (напр. 0.95)
-  metadata   Json?     // Додаткова інфа (фото з події, причина помилки)
+  metadata   Json?
 
   createdAt  DateTime  @default(now())
 }
@@ -150,12 +114,12 @@ model FeedingEvent {
 model UserFeeder {
   userId   String
   feederId String
-  role     String @default("OWNER") // OWNER або GUEST
+  role     String @default("OWNER")
 
   user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   feeder   Feeder @relation(fields: [feederId], references: [id], onDelete: Cascade)
 
-  @@id([userId, feederId]) // Композитний первинний ключ
+  @@id([userId, feederId])
 }
 
 model UserCat {
