@@ -132,17 +132,17 @@ export class FeedersController {
   //   }
   // }
 
-  // @Get(':deviceId/distance')
-  // async getFeederDistance(@Param('deviceId') deviceId: string) {
-  //   try {
-  //     // const distance = await this.feedersGateway.requestDistance(deviceId);
-  //     return { success: true, distance };
-  //   } catch (error: unknown) {
-  //     const message =
-  //       error instanceof Error ? error.message : 'Unknown error';
-  //     throw new InternalServerErrorException(message);
-  //   }
-  // }
+  @Get(':deviceId/distance')
+  async getFeederDistance(@Param('deviceId') deviceId: string) {
+    try {
+      const distance = await this.feedersGateway.requestDistance(deviceId);
+      return { success: true, distance };
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
+    }
+  }
 
   @Post(':deviceId/upload-snapshot')
   async uploadSnapshot(
