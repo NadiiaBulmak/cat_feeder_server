@@ -15,14 +15,12 @@ import { StorageModule } from './storage/storage.module.js';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
-    CameraModule,
     UsersModule,
     FeedersModule,
     AuthModule,
-    RecognitionModule,
     StorageModule,
   ],
-  controllers: [AppController, CameraController],
+  controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}

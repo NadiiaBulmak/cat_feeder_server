@@ -139,7 +139,7 @@ export class CameraService {
         await this.prisma.feedingEvent.create({
           data: {
             feederId: feeder.id,
-            eventType: EventType.CAT_DETECTED,
+            eventType: EventType.CAT_APPROACHED,
             metadata: { photoUrl, trigger: 'IR_SENSOR' },
           },
         });

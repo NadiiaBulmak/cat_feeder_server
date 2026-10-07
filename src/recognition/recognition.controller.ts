@@ -122,7 +122,7 @@ export class RecognitionController {
           data: {
             feederId: feeder.id,
             catId: match.catId,
-            eventType: EventType.IDENTIFICATION_FAILED,
+            eventType: EventType.HARDWARE_ERROR,
             confidence: match.similarity,
             metadata: { reason: 'ACCESS_DENIED', image: file.filename },
           },
@@ -150,7 +150,7 @@ export class RecognitionController {
         data: {
           feederId: feeder.id,
           catId: match.catId,
-          eventType: EventType.CAT_IDENTIFIED,
+          eventType: EventType.CAT_APPROACHED,
           confidence: match.similarity,
           metadata: { action: 'COMMAND_OPEN_SENT', image: file.filename },
         },
@@ -168,7 +168,7 @@ export class RecognitionController {
       await this.prisma.feedingEvent.create({
         data: {
           feederId: feeder.id,
-          eventType: EventType.UNKNOWN_CAT,
+          eventType: EventType.HARDWARE_ERROR,
           confidence: match.similarity,
           metadata: { image: file.filename },
         },
