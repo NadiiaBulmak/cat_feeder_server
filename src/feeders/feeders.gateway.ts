@@ -26,6 +26,8 @@ export class FeedersGateway
     string,
     (distance: number) => void
   >();
+
+  // 🚀 Зберігаємо MAC у нижньому регістрі: mac.toLowerCase() -> timestamp (ms)
   private lastBleDetections = new Map<string, number>();
   private readonly logger = new Logger(FeedersGateway.name);
 
@@ -66,10 +68,12 @@ export class FeedersGateway
           try {
             const data = JSON.parse(msg);
 
+            // 1. Обов'язково зводимо MAC до .toLowerCase()
             if (data.event === 'BLE_DETECTED' && data.mac) {
-              this.lastBleDetections.set(data.mac, Date.now());
+              const cleanMac = data.mac.trim().toLowerCase();
+              this.lastBleDetections.set(cleanMac, Date.now());
               this.logger.log(
-                `📡 [BLE] Знайдено мітку ${data.mac} | RSSI: ${data.rssi} dBm`,
+                `📡 [BLE] Знайдено мітку ${cleanMac} | RSSI: ${data.rssi} dBm`,
               );
             }
 
@@ -132,23 +136,57 @@ export class FeedersGateway
               }
             }
 
+            // 2. Виявлення кота лазером + перевірка BLE з БД
             if (data.event === 'CAT_APPROACHED') {
               this.logger.log(
                 LOG_MESSAGES.catApproached(deviceId, data.distance ?? 'N/A'),
               );
 
-              const targetMac = 'ff:ff:55:04:dc:bd';
+              // Шукаємо котика, прив'язаного до цієї конкретної годівнички
+              const feederCat = await this.prisma.feederCat.findFirst({
+                where: { feeder: { deviceId } },
+                include: { cat: true },
+              });
+
+              const targetMac = feederCat?.cat?.bleMac
+                ? feederCat.cat.bleMac.trim().toLowerCase()
+                : 'ff:ff:55:04:dc:bd';
+
               const lastSeen = this.lastBleDetections.get(targetMac) || 0;
-              const isTagNearby = Date.now() - lastSeen <= 15000;
+              const timeDiff = Date.now() - lastSeen;
+              const isTagNearby = timeDiff <= 15000;
 
               if (isTagNearby) {
                 this.logger.log(
-                  `🟢 [ДОСТУП ДОЗВОЛЕНО] Мітка поруч. Відправляємо команду OPEN!`,
+                  `🟢 [ДОСТУП ДОЗВОЛЕНО] Мітка ${targetMac} поруч (${(timeDiff / 1000).toFixed(1)}s тому). Відправляємо команду OPEN!`,
                 );
-                this.sendCommandToDevice(deviceId, 'OPEN');
+                this.sendCommandToDevice(deviceId, 'OPEN', feederCat?.catId);
+
+                const feeder = await this.prisma.feeder.findUnique({
+                  where: { deviceId },
+                });
+
+                if (!feeder) {
+                  this.logger.warn(
+                    `⚠️ [CAT_APPROACHED] deviceId=${deviceId}. No feeder found.`,
+                  );
+                } else {
+                  // Записуємо подібну успішну підхід-подію
+                  await this.prisma.feedingEvent.create({
+                    data: {
+                      feederId: feeder.id,
+                      catId: feederCat?.catId,
+                      eventType: EventType.CAT_APPROACHED,
+                      metadata: {
+                        distance: data.distance,
+                        bleTimeDiffMs: timeDiff,
+                      },
+                    },
+                  });
+                }
               } else {
                 this.logger.log(
-                  `🔴 [ДОСТУП ЗАБОРОНЕНО] Хтось підійшов, але мітки немає поблизу.`,
+                  `🔴 [ДОСТУП ЗАБОРОНЕНО] Об'єкт біля лазера, але мітки ${targetMac} не видно поруч (минуло ${(timeDiff / 1000).toFixed(1)}s).`,
                 );
               }
             }
