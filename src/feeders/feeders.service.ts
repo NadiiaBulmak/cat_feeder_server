@@ -10,6 +10,7 @@ import { FeederAction, FeederState } from '../shared/enums.js';
 import { FeedersGateway } from './feeders.gateway.js';
 import { ERROR_MESSAGES } from '../shared/error-messages.js';
 import { LOG_MESSAGES } from '../shared/log-messages.js';
+import { CreateFeederExtendDto } from './dto/create-feeder-extended.dto.js';
 
 @Injectable()
 export class FeedersService {
@@ -25,6 +26,110 @@ export class FeedersService {
       lastPing: createFeederDto.lastPing ?? new Date(),
       createdAt: createFeederDto.createdAt ?? new Date(),
       updatedAt: createFeederDto.updatedAt ?? new Date(),
+    });
+  }
+
+  async createExtended(createFeederExtendDto: CreateFeederExtendDto) {
+    await this.prisma.$transaction(async (prisma) => {
+      // 1. СПОЧАТКУ створюємо або оновлюємо Feeder, щоб усі наступні записи мали на що посилатися
+      await prisma.feeder.upsert({
+        where: { deviceId: createFeederExtendDto.deviceId },
+        create: {
+          deviceId: createFeederExtendDto.deviceId,
+          name: createFeederExtendDto.name ?? createFeederExtendDto.deviceId,
+          actualState: createFeederExtendDto.actualState ?? FeederState.CLOSED,
+          desiredState:
+            createFeederExtendDto.desiredState ?? FeederState.CLOSED,
+        },
+        update: {
+          name: createFeederExtendDto.name ?? createFeederExtendDto.deviceId,
+          actualState: createFeederExtendDto.actualState ?? FeederState.CLOSED,
+          desiredState:
+            createFeederExtendDto.desiredState ?? FeederState.CLOSED,
+          lastPing: createFeederExtendDto.lastPing ?? new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      // 2. Оновлюємо котика (записуємо його BLE MAC)
+      await prisma.cat.update({
+        where: { id: createFeederExtendDto.catId },
+        data: { bleMac: createFeederExtendDto.bleMacAddress },
+      });
+
+      // 3. Зв'язуємо юзера з котиком (використовуємо upsert, щоб не впасти, якщо зв'язок вже є)
+      await prisma.userCat.upsert({
+        where: {
+          userId_catId: {
+            userId: (
+              await prisma.user.findUniqueOrThrow({
+                where: { email: createFeederExtendDto.userEmail },
+              })
+            ).id,
+            catId: createFeederExtendDto.catId,
+          },
+        },
+        create: {
+          user: { connect: { email: createFeederExtendDto.userEmail } },
+          cat: { connect: { id: createFeederExtendDto.catId } },
+        },
+        update: {},
+      });
+
+      // 4. Зв'язуємо юзера з годівничкою
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { email: createFeederExtendDto.userEmail },
+      });
+      const feeder = await prisma.feeder.findUniqueOrThrow({
+        where: { deviceId: createFeederExtendDto.deviceId },
+      });
+
+      await prisma.userFeeder.upsert({
+        where: {
+          userId_feederId: {
+            userId: user.id,
+            feederId: feeder.id,
+          },
+        },
+        create: {
+          userId: user.id,
+          feederId: feeder.id,
+        },
+        update: {},
+      });
+
+      // 5. Зв'язуємо годівничку з котиком
+      await prisma.feederCat.upsert({
+        where: {
+          feederId_catId: {
+            feederId: feeder.id,
+            catId: createFeederExtendDto.catId,
+          },
+        },
+        create: {
+          feederId: feeder.id,
+          catId: createFeederExtendDto.catId,
+        },
+        update: {},
+      });
+
+      console.log('Feeder created and associated successfully.');
+    });
+
+    return this.prisma.feeder.findUnique({
+      where: { deviceId: createFeederExtendDto.deviceId },
+      include: {
+        userFeeders: {
+          include: {
+            user: true,
+          },
+        },
+        feederCats: {
+          include: {
+            cat: true,
+          },
+        },
+      },
     });
   }
 

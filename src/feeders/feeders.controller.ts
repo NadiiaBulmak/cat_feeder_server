@@ -22,6 +22,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { FeedersGateway } from './feeders.gateway.js';
 import { ERROR_MESSAGES } from '../shared/error-messages.js';
 import { LOG_MESSAGES } from '../shared/log-messages.js';
+import { CreateFeederExtendDto } from './dto/create-feeder-extended.dto.js';
 
 @Controller('feeders')
 export class FeedersController {
@@ -36,6 +37,11 @@ export class FeedersController {
   @Post()
   create(@Body() createFeederDto: CreateFeederDto) {
     return this.feedersService.create(createFeederDto);
+  }
+
+  @Post('extended')
+  createExtended(@Body() createFeederExtendDto: CreateFeederExtendDto) {
+    return this.feedersService.createExtended(createFeederExtendDto);
   }
 
   @Get()
