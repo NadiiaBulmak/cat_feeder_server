@@ -11,6 +11,7 @@ import {
   Logger,
   InternalServerErrorException,
   Req,
+  Header,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { FeedersService } from './feeders.service.js';
@@ -131,15 +132,19 @@ export class FeedersController {
   //     );
   //   }
   // }
-
   @Get(':deviceId/distance')
+  @Header(
+    'Cache-Control',
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  )
+  @Header('Pragma', 'no-cache')
+  @Header('Expires', '0')
   async getFeederDistance(@Param('deviceId') deviceId: string) {
     try {
       const distance = await this.feedersGateway.requestDistance(deviceId);
       return { success: true, distance };
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown error';
+      const message = error instanceof Error ? error.message : 'Unknown error';
       throw new InternalServerErrorException(message);
     }
   }
