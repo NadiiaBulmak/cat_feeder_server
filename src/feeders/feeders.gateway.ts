@@ -68,7 +68,7 @@ export class FeedersGateway
             const data = JSON.parse(msg);
 
             if (data.event === 'BLE_DETECTED' && data.mac) {
-              if (data.rssi < -70) {
+              if (data.rssi < -60) {
                 return;
               }
               const cleanMac = data.mac.trim().toLowerCase();
