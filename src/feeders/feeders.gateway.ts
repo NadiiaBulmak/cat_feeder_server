@@ -88,38 +88,35 @@ export class FeedersGateway
 
               const targetDeviceId =
                 feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
+              const now = Date.now();
+              const lastCheck = this.lastDistanceCheck.get(targetDeviceId) || 0;
 
-              if (this.connectedDevices.has(targetDeviceId)) {
-                const now = Date.now();
-                const lastCheck =
-                  this.lastDistanceCheck.get(targetDeviceId) || 0;
+              if (
+                this.connectedDevices.has(targetDeviceId) &&
+                feederCat?.feeder?.actualState !== FeederState.OPEN &&
+                !this.pendingDistanceRequests.has(targetDeviceId) &&
+                now - lastCheck >= 3000
+              ) {
+                this.lastDistanceCheck.set(targetDeviceId, now);
 
-                if (now - lastCheck >= 2500) {
-                  this.lastDistanceCheck.set(targetDeviceId, now);
+                try {
+                  const currentDistance =
+                    await this.requestDistance(targetDeviceId);
 
-                  try {
-                    const currentDistance =
-                      await this.requestDistance(targetDeviceId);
-
-                    if (currentDistance > 0 && currentDistance <= 350) {
-                      this.sendCommandToDevice(
-                        targetDeviceId,
-                        'OPEN',
-                        feederCat?.catId,
-                      );
-                      if (feederCat?.feeder?.actualState !== FeederState.OPEN) {
-                        this.logger.log(
-                          `🟢 Action: OPEN | Trigger: BLE_PROACTIVE | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
-                        );
-                      }
-                    }
-                  } catch (err) {
-                    const errorMessage =
-                      err instanceof Error ? err.message : String(err);
-                    this.logger.warn(
-                      `⚠️ Error checking distance for ${targetDeviceId}: ${errorMessage}`,
+                  if (currentDistance > 0 && currentDistance <= 350) {
+                    this.logger.log(
+                      `🟢 Action: OPEN | Trigger: BLE_PROACTIVE | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
+                    );
+                    this.sendCommandToDevice(
+                      targetDeviceId,
+                      'OPEN',
+                      feederCat?.catId,
                     );
                   }
+                } catch (err) {
+                  this.logger.debug(
+                    `⚠️ Skip check for ${targetDeviceId}: Timeout`,
+                  );
                 }
               }
             }
