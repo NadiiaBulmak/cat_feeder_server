@@ -16,6 +16,4 @@ export enum EventType {
   FEEDER_CLOSED='FEEDER_CLOSED',
   CAT_LEFT='CAT_LEFT',
   APP_COMMAND='APP_COMMAND',
-
-
 }

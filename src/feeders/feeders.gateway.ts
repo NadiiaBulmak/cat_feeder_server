@@ -14,6 +14,7 @@ import { EventType } from '@prisma/client';
 import { ERROR_MESSAGES } from '../shared/error-messages.js';
 import { LOG_MESSAGES } from '../shared/log-messages.js';
 import { BleState } from './interfaces/bleState.js';
+import { FeederStateType } from './types/feederStateType.js';
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -272,24 +273,19 @@ export class FeedersGateway
     return Array.from(this.connectedDevices.keys());
   }
 
-  async getFeederState(id: string): Promise<{
-    desiredState: FeederState;
-    actualState: FeederState;
-    lastStateChange: Date | null;
-    lastDistance: number | null;
-    bleState: BleState;
-    connectedDevices: string[];
-  }> {
+  async getFeederState(id: string, userId: string): Promise<FeederStateType> {
     const feeder = await this.prisma.feeder.findFirst({
       where: {
         id,
+        userId,
       },
     });
-    const deviceId = feeder?.deviceId;
-
-    if (!deviceId) {
+    
+    if (!feeder?.deviceId || !feeder) {
       throw new Error(`Feeder [${id}] not found`);
     }
+    
+    const deviceId = feeder?.deviceId;
     const [lastDistance, feederCat] = await Promise.all([
       this.requestDistance(deviceId).catch(() => null),
       this.prisma.feederCat.findFirst({
@@ -311,14 +307,8 @@ export class FeedersGateway
       rssi: null,
     };
 
-    const normalizedFeeder = {
-      desiredState: feeder.desiredState as FeederState,
-      actualState: feeder.actualState as FeederState,
-      lastStateChange: feeder.updatedAt,
-    };
-
     return {
-      ...normalizedFeeder,
+      ...feeder,
       lastDistance,
       bleState,
       connectedDevices: this.getConnectedDevices(),

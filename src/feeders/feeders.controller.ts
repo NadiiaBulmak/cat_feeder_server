@@ -56,11 +56,13 @@ export class FeedersController {
     return this.feedersService.getFeedersByUserId(user.id);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.feedersService.findOne(id);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Patch(':id/:action')
   update(@Param('id') id: string, @Param('action') action: FeederAction) {
     this.logger.log(LOG_MESSAGES.feederUpdateRequested(id, action));
@@ -132,6 +134,8 @@ export class FeedersController {
   //     );
   //   }
   // }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':deviceId/distance')
   @Header(
     'Cache-Control',
@@ -149,6 +153,7 @@ export class FeedersController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get(':deviceId/state')
   @Header(
     'Cache-Control',
@@ -156,10 +161,11 @@ export class FeedersController {
   )
   @Header('Pragma', 'no-cache')
   @Header('Expires', '0')
-  async getFeederState(@Param('deviceId') deviceId: string) {
+  async getFeederState(@CurrentUser() user: { id: string }, @Param('deviceId') deviceId: string) {
+    // const user = this.getUserFromRequest();
     try {
-      const state = await this.feedersGateway.getFeederState(deviceId);
-      return { success: true, state };
+      const state = await this.feedersGateway.getFeederState(deviceId, user.id);
+      return { success: true, ...state };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new InternalServerErrorException(message);
