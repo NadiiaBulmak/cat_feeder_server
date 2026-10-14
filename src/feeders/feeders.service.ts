@@ -181,7 +181,12 @@ export class FeedersService {
   }
 
   getFeedersByUserId(userId: string) {
-    return this.feederRepository.findManyByUserId(userId);
+    // return this.feederRepository.findManyByUserId(userId);
+    return this.getFeedersByUserIdExtended(userId);
+  }
+
+  getFeedersByUserIdExtended(userId: string) {
+    return this.gateway.getFeedersStateExtended(userId);
   }
 
   updateData(userId: string, catId: string, feederId: string) {
