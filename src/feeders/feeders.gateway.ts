@@ -164,9 +164,10 @@ export class FeedersGateway
                 where: { deviceId },
                 data: {
                   actualState: newState,
-                  ...(newState === FeederState.CLOSED && {
-                    desiredState: FeederState.CLOSED,
-                  }),
+                  desiredState: newState,
+                  // ...(newState === FeederState.CLOSED && {
+                  //   desiredState: FeederState.CLOSED,
+                  // }),
                 },
               });
 
