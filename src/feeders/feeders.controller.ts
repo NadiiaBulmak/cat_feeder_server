@@ -161,11 +161,34 @@ export class FeedersController {
   )
   @Header('Pragma', 'no-cache')
   @Header('Expires', '0')
-  async getFeederState(@CurrentUser() user: { id: string }, @Param('deviceId') deviceId: string) {
+  async getFeederState(
+    @CurrentUser() user: { id: string },
+    @Param('deviceId') deviceId: string,
+  ) {
     // const user = this.getUserFromRequest();
     try {
       const state = await this.feedersGateway.getFeederState(deviceId, user.id);
       return { success: true, ...state };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('state')
+  @Header(
+    'Cache-Control',
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  )
+  @Header('Pragma', 'no-cache')
+  @Header('Expires', '0')
+  async getFeedersStateExtended(@CurrentUser() user: { id: string }) {
+    try {
+      const feeders = await this.feedersGateway.getFeedersStateExtended(
+        user.id,
+      );
+      return { success: true, feeders };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new InternalServerErrorException(message);

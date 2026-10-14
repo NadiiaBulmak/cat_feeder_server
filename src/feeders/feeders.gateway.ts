@@ -10,11 +10,15 @@ import type { IncomingMessage } from 'http';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FeederState } from '../shared/enums.js';
-import { EventType } from '@prisma/client';
+import { EventType, type Prisma } from '@prisma/client';
 import { ERROR_MESSAGES } from '../shared/error-messages.js';
 import { LOG_MESSAGES } from '../shared/log-messages.js';
 import { BleState } from './interfaces/bleState.js';
 import { FeederStateType } from './types/feederStateType.js';
+
+type FeederWithCats = Prisma.FeederGetPayload<{
+  include: { feederCats: { include: { cat: true } } };
+}>;
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -281,27 +285,40 @@ export class FeedersGateway
           some: { userId },
         },
       },
+      include: { feederCats: { include: { cat: true } } },
     });
 
-    if (!feeder?.deviceId || !feeder) {
+    if (!feeder) {
       throw new Error(`Feeder [${id}] not found`);
     }
 
-    const deviceId = feeder?.deviceId;
-    const [lastDistance, feederCat] = await Promise.all([
-      this.requestDistance(deviceId).catch(() => null),
-      this.prisma.feederCat.findFirst({
-        where: { feeder: { deviceId } },
-        include: { cat: true },
-      }),
-    ]);
+    return this.withLiveState(feeder);
+  }
 
-    if (!feeder) {
-      throw new Error(`Feeder [${deviceId}] not found`);
-    }
+  async getFeedersStateExtended(userId: string): Promise<FeederStateType[]> {
+    const feeders = await this.prisma.feeder.findMany({
+      where: {
+        userFeeders: {
+          some: { userId },
+        },
+      },
+      include: { feederCats: { include: { cat: true } } },
+    });
 
-    const targetMac = feederCat?.cat?.bleMac
-      ? feederCat.cat.bleMac.trim().toLowerCase()
+    return Promise.all(feeders.map((feeder) => this.withLiveState(feeder)));
+  }
+
+  private async withLiveState(
+    feeder: FeederWithCats,
+  ): Promise<FeederStateType> {
+    const deviceId = feeder.deviceId;
+    const lastDistance = await this.requestDistance(deviceId).catch(
+      () => null,
+    );
+
+    const bleMac = feeder.feederCats[0]?.cat.bleMac;
+    const targetMac = bleMac
+      ? bleMac.trim().toLowerCase()
       : 'ff:ff:55:04:dc:bd';
 
     const bleState = this.bleState.get(targetMac) || {
