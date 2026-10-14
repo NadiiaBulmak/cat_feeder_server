@@ -13,6 +13,7 @@ import { FeederState } from '../shared/enums.js';
 import { EventType } from '@prisma/client';
 import { ERROR_MESSAGES } from '../shared/error-messages.js';
 import { LOG_MESSAGES } from '../shared/log-messages.js';
+import { BleState } from './interfaces/bleState.js';
 
 @WebSocketGateway({ path: '/ws/device' })
 export class FeedersGateway
@@ -27,7 +28,8 @@ export class FeedersGateway
     (distance: number) => void
   >();
 
-  private lastBleDetections = new Map<string, number>();
+  private bleState = new Map<string, BleState>();
+
   private readonly logger = new Logger(FeedersGateway.name);
 
   constructor(private prisma: PrismaService) {}
@@ -66,39 +68,60 @@ export class FeedersGateway
         if (msg.startsWith('{')) {
           try {
             const data = JSON.parse(msg);
-
             if (data.event === 'BLE_DETECTED' && data.mac) {
               if (data.rssi < -65) {
                 return;
               }
               const cleanMac = data.mac.trim().toLowerCase();
-              this.lastBleDetections.set(cleanMac, Date.now());
-              this.logger.log(
-                `📡 [BLE] Знайдено мітку ${cleanMac} | RSSI: ${data.rssi} dBm`,
-              );
+              this.bleState.set(cleanMac, {
+                lastSeen: Date.now(),
+                rssi: data.rssi,
+              });
 
               const feederCat = await this.prisma.feederCat.findFirst({
-                where: { cat: { bleMac: { equals: cleanMac, mode: 'insensitive' } } },
+                where: {
+                  cat: { bleMac: { equals: cleanMac, mode: 'insensitive' } },
+                },
                 include: { feeder: true },
               });
 
-              const targetDeviceId = feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
+              const targetDeviceId =
+                feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
 
               if (this.connectedDevices.has(targetDeviceId)) {
                 try {
-                  const currentDistance = await this.requestDistance(targetDeviceId);
-                  this.logger.log(`📏 [CHECK] Поточна відстань: ${currentDistance} мм`);
+                  const currentDistance =
+                    await this.requestDistance(targetDeviceId);
 
                   if (currentDistance > 0 && currentDistance <= 350) {
                     this.logger.log(
-                      `🟢 [АВТО-ВІДКРИТТЯ] Мітка поруч ТА кіт біля лазера (${currentDistance} мм). Відправляємо OPEN!`,
+                      `🟢 Action: OPEN | Trigger: BLE_DETECT | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
                     );
-                    this.sendCommandToDevice(targetDeviceId, 'OPEN', feederCat?.catId);
+                    this.sendCommandToDevice(
+                      targetDeviceId,
+                      'OPEN',
+                      feederCat?.catId,
+                    );
                   }
                 } catch (err) {
-                  const errorMessage = err instanceof Error ? err.message : String(err);
-                  this.logger.warn(`⚠️ Помилка запиту відстані від ${targetDeviceId}: ${errorMessage}`);
+                  const errorMessage =
+                    err instanceof Error ? err.message : String(err);
+                  this.logger.warn(
+                    `⚠️ Error with ${targetDeviceId}: ${errorMessage}`,
+                  );
                 }
+              }
+            }
+
+            if (data.event === 'BLE_DISCONNECTED' && data.mac) {
+              const cleanMac = data.mac.trim().toLowerCase();
+              this.logger.warn(`🔴 [BLE] iTag ${cleanMac} disconnected`);
+
+              if (this.bleState.has(cleanMac)) {
+                this.bleState.set(cleanMac, {
+                  lastSeen: 0,
+                  rssi: null,
+                });
               }
             }
 
@@ -162,10 +185,6 @@ export class FeedersGateway
             }
 
             if (data.event === 'CAT_APPROACHED') {
-              this.logger.log(
-                LOG_MESSAGES.catApproached(deviceId, data.distance ?? 'N/A'),
-              );
-
               const feederCat = await this.prisma.feederCat.findFirst({
                 where: { feeder: { deviceId } },
                 include: { cat: true },
@@ -175,26 +194,27 @@ export class FeedersGateway
                 ? feederCat.cat.bleMac.trim().toLowerCase()
                 : 'ff:ff:55:04:dc:bd';
 
-              const lastSeen = this.lastBleDetections.get(targetMac) || 0;
-              const timeDiff = Date.now() - lastSeen;
-              const isTagNearby = timeDiff <= 15000;
+              const tagState = this.bleState.get(targetMac);
+              const lastSeen = tagState?.lastSeen || 0;
+              const currentRssi = tagState?.rssi ?? 'N/A';
+
+              const timeDiffMs = Date.now() - lastSeen;
+              const isTagNearby = timeDiffMs <= 15000;
 
               if (isTagNearby) {
                 this.logger.log(
-                  `🟢 [ДОСТУП ДОЗВОЛЕНО] Мітка ${targetMac} поруч (${(timeDiff / 1000).toFixed(1)}s тому). Відправляємо OPEN!`,
+                  `🟢 Action: OPEN | Trigger: LASER | Distance: ${data.distance ?? 'N/A'}mm | Tag: ${targetMac} | RSSI: ${currentRssi} dBm | LastSeen: ${(timeDiffMs / 1000).toFixed(1)}s ago`,
                 );
                 this.sendCommandToDevice(deviceId, 'OPEN', feederCat?.catId);
               } else {
-                this.logger.log(
-                  `🔴 [ДОСТУП ЗАБОРОНЕНО] Лазер спрацював, але мітка ${targetMac} не зафіксована поруч (${(timeDiff / 1000).toFixed(1)}s тому).`,
+                this.logger.warn(
+                  `🔴 Action: REJECT | Trigger: LASER | Distance: ${data.distance ?? 'N/A'}mm | Tag: ${targetMac} | LastSeen: ${(timeDiffMs / 1000).toFixed(1)}s ago`,
                 );
               }
             }
 
             if (data.event === 'CAT_LEFT') {
-              this.logger.log(
-                `🐈 [КІТ ПІШОВ] Відстань: ${data.distance} мм. Відраховуємо 30 сек до закриття...`,
-              );
+              this.logger.log(`🐈 [CAT_LEFT] Distance: ${data.distance} мм.`);
             }
           } catch (e) {
             this.logger.error(
@@ -237,6 +257,39 @@ export class FeedersGateway
         resolve(distance);
       });
     });
+  }
+
+  async getFeederState(deviceId: string): Promise<{
+    desiredState: FeederState;
+    actualState: FeederState;
+    lastStateChange: Date | null;
+    lastDistance: number | null;
+    bleState: BleState;
+  }> {
+    const [feeder, lastDistance, bleState] = await Promise.all([
+      this.prisma.feeder.findUnique({
+        where: { deviceId },
+        select: { actualState: true, desiredState: true, lastStateChange: true },
+      }),
+      this.requestDistance(deviceId).catch(() => null),
+      this.bleState.get(deviceId) || { lastSeen: 0, rssi: null },
+    ]);
+
+    if (!feeder || lastDistance === null) {
+      throw new Error(`Feeder [${deviceId}] not found`);
+    }
+
+    const normalizedFeeder = {
+      desiredState: feeder.desiredState as FeederState,
+      actualState: feeder.actualState as FeederState,
+      lastStateChange: feeder.lastStateChange as Date | null,
+    };
+
+    return {
+      ...normalizedFeeder,
+      lastDistance,
+      bleState: bleState || { lastSeen: 0, rssi: null },
+    };
   }
 
   sendCommandToDevice(

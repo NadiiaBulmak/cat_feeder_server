@@ -149,6 +149,23 @@ export class FeedersController {
     }
   }
 
+  @Get(':deviceId/state')
+  @Header(
+    'Cache-Control',
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  )
+  @Header('Pragma', 'no-cache')
+  @Header('Expires', '0')
+  async getFeederState(@Param('deviceId') deviceId: string) {
+    try {
+      const state = await this.feedersGateway.getFeederState(deviceId);
+      return { success: true, state };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(message);
+    }
+  }
+
   @Post(':deviceId/upload-snapshot')
   async uploadSnapshot(
     @Param('deviceId') deviceId: string,
