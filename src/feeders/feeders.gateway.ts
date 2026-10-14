@@ -272,7 +272,7 @@ export class FeedersGateway
     return Array.from(this.connectedDevices.keys());
   }
 
-  async getFeederState(deviceId: string): Promise<{
+  async getFeederState(id: string): Promise<{
     desiredState: FeederState;
     actualState: FeederState;
     lastStateChange: Date | null;
@@ -280,15 +280,17 @@ export class FeedersGateway
     bleState: BleState;
     connectedDevices: string[];
   }> {
-    const [feeder, lastDistance, feederCat] = await Promise.all([
-      this.prisma.feeder.findUnique({
-        where: { deviceId },
-        select: {
-          actualState: true,
-          desiredState: true,
-          lastStateChange: true,
-        },
-      }),
+    const feeder = await this.prisma.feeder.findFirst({
+      where: {
+        id,
+      },
+    });
+    const deviceId = feeder?.deviceId;
+
+    if (!deviceId) {
+      throw new Error(`Feeder [${id}] not found`);
+    }
+    const [lastDistance, feederCat] = await Promise.all([
       this.requestDistance(deviceId).catch(() => null),
       this.prisma.feederCat.findFirst({
         where: { feeder: { deviceId } },
@@ -312,7 +314,7 @@ export class FeedersGateway
     const normalizedFeeder = {
       desiredState: feeder.desiredState as FeederState,
       actualState: feeder.actualState as FeederState,
-      lastStateChange: feeder.lastStateChange as Date | null,
+      lastStateChange: feeder.updatedAt,
     };
 
     return {
