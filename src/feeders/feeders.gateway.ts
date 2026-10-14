@@ -268,12 +268,17 @@ export class FeedersGateway
     });
   }
 
+  getConnectedDevices(): string[] {
+    return Array.from(this.connectedDevices.keys());
+  }
+
   async getFeederState(deviceId: string): Promise<{
     desiredState: FeederState;
     actualState: FeederState;
     lastStateChange: Date | null;
     lastDistance: number | null;
     bleState: BleState;
+    connectedDevices: string[];
   }> {
     const [feeder, lastDistance, feederCat] = await Promise.all([
       this.prisma.feeder.findUnique({
@@ -314,6 +319,7 @@ export class FeedersGateway
       ...normalizedFeeder,
       lastDistance,
       bleState,
+      connectedDevices: this.getConnectedDevices(),
     };
   }
 
