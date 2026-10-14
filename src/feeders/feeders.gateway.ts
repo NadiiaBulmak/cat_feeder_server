@@ -29,6 +29,7 @@ export class FeedersGateway
   >();
 
   private bleState = new Map<string, BleState>();
+  private lastDistanceCheck = new Map<string, number>();
 
   private readonly logger = new Logger(FeedersGateway.name);
 
@@ -78,39 +79,49 @@ export class FeedersGateway
                 rssi: data.rssi,
               });
 
-              // const feederCat = await this.prisma.feederCat.findFirst({
-              //   where: {
-              //     cat: { bleMac: { equals: cleanMac, mode: 'insensitive' } },
-              //   },
-              //   include: { feeder: true },
-              // });
+              const feederCat = await this.prisma.feederCat.findFirst({
+                where: {
+                  cat: { bleMac: { equals: cleanMac, mode: 'insensitive' } },
+                },
+                include: { feeder: true },
+              });
 
-              // const targetDeviceId =
-              //   feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
+              const targetDeviceId =
+                feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
 
-              // if (this.connectedDevices.has(targetDeviceId)) {
-              //   try {
-              //     const currentDistance =
-              //       await this.requestDistance(targetDeviceId);
+              if (this.connectedDevices.has(targetDeviceId)) {
+                const now = Date.now();
+                const lastCheck =
+                  this.lastDistanceCheck.get(targetDeviceId) || 0;
 
-              //     if (currentDistance > 0 && currentDistance <= 350) {
-              //       this.logger.log(
-              //         `🟢 Action: OPEN | Trigger: BLE_DETECT | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
-              //       );
-              //       this.sendCommandToDevice(
-              //         targetDeviceId,
-              //         'OPEN',
-              //         feederCat?.catId,
-              //       );
-              //     }
-              //   } catch (err) {
-              //     const errorMessage =
-              //       err instanceof Error ? err.message : String(err);
-              //     this.logger.warn(
-              //       `⚠️ Error with ${targetDeviceId}: ${errorMessage}`,
-              //     );
-              //   }
-              // }
+                if (now - lastCheck >= 2500) {
+                  this.lastDistanceCheck.set(targetDeviceId, now);
+
+                  try {
+                    const currentDistance =
+                      await this.requestDistance(targetDeviceId);
+
+                    if (currentDistance > 0 && currentDistance <= 350) {
+                      this.sendCommandToDevice(
+                        targetDeviceId,
+                        'OPEN',
+                        feederCat?.catId,
+                      );
+                      if (feederCat?.feeder?.actualState !== FeederState.OPEN) {
+                        this.logger.log(
+                          `🟢 Action: OPEN | Trigger: BLE_PROACTIVE | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
+                        );
+                      }
+                    }
+                  } catch (err) {
+                    const errorMessage =
+                      err instanceof Error ? err.message : String(err);
+                    this.logger.warn(
+                      `⚠️ Error checking distance for ${targetDeviceId}: ${errorMessage}`,
+                    );
+                  }
+                }
+              }
             }
 
             if (data.event === 'BLE_DISCONNECTED' && data.mac) {
@@ -266,7 +277,7 @@ export class FeedersGateway
     lastDistance: number | null;
     bleState: BleState;
   }> {
-    const [feeder, lastDistance, bleState] = await Promise.all([
+    const [feeder, lastDistance, feederCat] = await Promise.all([
       this.prisma.feeder.findUnique({
         where: { deviceId },
         select: {
@@ -276,12 +287,24 @@ export class FeedersGateway
         },
       }),
       this.requestDistance(deviceId).catch(() => null),
-      this.bleState.get(deviceId) || { lastSeen: 0, rssi: null },
+      this.prisma.feederCat.findFirst({
+        where: { feeder: { deviceId } },
+        include: { cat: true },
+      }),
     ]);
 
-    if (!feeder || lastDistance === null) {
+    if (!feeder) {
       throw new Error(`Feeder [${deviceId}] not found`);
     }
+
+    const targetMac = feederCat?.cat?.bleMac
+      ? feederCat.cat.bleMac.trim().toLowerCase()
+      : 'ff:ff:55:04:dc:bd';
+
+    const bleState = this.bleState.get(targetMac) || {
+      lastSeen: 0,
+      rssi: null,
+    };
 
     const normalizedFeeder = {
       desiredState: feeder.desiredState as FeederState,
@@ -292,7 +315,7 @@ export class FeedersGateway
     return {
       ...normalizedFeeder,
       lastDistance,
-      bleState: bleState || { lastSeen: 0, rssi: null },
+      bleState,
     };
   }
 
