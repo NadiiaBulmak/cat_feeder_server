@@ -277,14 +277,16 @@ export class FeedersGateway
     const feeder = await this.prisma.feeder.findFirst({
       where: {
         id,
-        userId,
+        userFeeders: {
+          some: { userId },
+        },
       },
     });
-    
+
     if (!feeder?.deviceId || !feeder) {
       throw new Error(`Feeder [${id}] not found`);
     }
-    
+
     const deviceId = feeder?.deviceId;
     const [lastDistance, feederCat] = await Promise.all([
       this.requestDistance(deviceId).catch(() => null),
