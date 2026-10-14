@@ -78,39 +78,39 @@ export class FeedersGateway
                 rssi: data.rssi,
               });
 
-              const feederCat = await this.prisma.feederCat.findFirst({
-                where: {
-                  cat: { bleMac: { equals: cleanMac, mode: 'insensitive' } },
-                },
-                include: { feeder: true },
-              });
+              // const feederCat = await this.prisma.feederCat.findFirst({
+              //   where: {
+              //     cat: { bleMac: { equals: cleanMac, mode: 'insensitive' } },
+              //   },
+              //   include: { feeder: true },
+              // });
 
-              const targetDeviceId =
-                feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
+              // const targetDeviceId =
+              //   feederCat?.feeder?.deviceId || 'esp8266-feeder-01';
 
-              if (this.connectedDevices.has(targetDeviceId)) {
-                try {
-                  const currentDistance =
-                    await this.requestDistance(targetDeviceId);
+              // if (this.connectedDevices.has(targetDeviceId)) {
+              //   try {
+              //     const currentDistance =
+              //       await this.requestDistance(targetDeviceId);
 
-                  if (currentDistance > 0 && currentDistance <= 350) {
-                    this.logger.log(
-                      `🟢 Action: OPEN | Trigger: BLE_DETECT | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
-                    );
-                    this.sendCommandToDevice(
-                      targetDeviceId,
-                      'OPEN',
-                      feederCat?.catId,
-                    );
-                  }
-                } catch (err) {
-                  const errorMessage =
-                    err instanceof Error ? err.message : String(err);
-                  this.logger.warn(
-                    `⚠️ Error with ${targetDeviceId}: ${errorMessage}`,
-                  );
-                }
-              }
+              //     if (currentDistance > 0 && currentDistance <= 350) {
+              //       this.logger.log(
+              //         `🟢 Action: OPEN | Trigger: BLE_DETECT | Distance: ${currentDistance}mm | Tag: ${cleanMac} | RSSI: ${data.rssi} dBm`,
+              //       );
+              //       this.sendCommandToDevice(
+              //         targetDeviceId,
+              //         'OPEN',
+              //         feederCat?.catId,
+              //       );
+              //     }
+              //   } catch (err) {
+              //     const errorMessage =
+              //       err instanceof Error ? err.message : String(err);
+              //     this.logger.warn(
+              //       `⚠️ Error with ${targetDeviceId}: ${errorMessage}`,
+              //     );
+              //   }
+              // }
             }
 
             if (data.event === 'BLE_DISCONNECTED' && data.mac) {
@@ -269,7 +269,11 @@ export class FeedersGateway
     const [feeder, lastDistance, bleState] = await Promise.all([
       this.prisma.feeder.findUnique({
         where: { deviceId },
-        select: { actualState: true, desiredState: true, lastStateChange: true },
+        select: {
+          actualState: true,
+          desiredState: true,
+          lastStateChange: true,
+        },
       }),
       this.requestDistance(deviceId).catch(() => null),
       this.bleState.get(deviceId) || { lastSeen: 0, rssi: null },
